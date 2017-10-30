@@ -1013,7 +1013,7 @@ namespace rsx
 				auto cached_texture = find_texture_from_dimensions(texaddr, tex_width, tex_height, depth);
 				if (cached_texture)
 				{
-					return{ cached_texture->get_raw_view(), cached_texture->get_context(), false, 1.f };
+					return{ cached_texture->get_raw_view(), cached_texture->get_context(), cached_texture->is_depth_texture(), 1.f };
 				}
 
 				if ((!blit_engine_incompatibility_warning_raised && g_cfg.video.use_gpu_texture_scaling) || is_hw_blit_engine_compatible(format))
@@ -1056,7 +1056,7 @@ namespace rsx
 
 									auto src_image = surface->get_raw_texture();
 									if (auto result = create_temporary_subresource_view(cmd, &src_image, format, offset_x, offset_y, tex_width, tex_height))
-										return{ result, texture_upload_context::blit_engine_dst, false, 1.f };
+										return{ result, texture_upload_context::blit_engine_dst, surface->is_depth_texture(), 1.f };
 								}
 							}
 						}

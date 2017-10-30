@@ -365,11 +365,12 @@ void GLGSRender::end()
 
 				if (rsx::method_registers.fragment_textures[i].enabled())
 				{
+					glActiveTexture(GL_TEXTURE0 + i);
+
 					*sampler_state = m_gl_texture_cache.upload_texture(unused, rsx::method_registers.fragment_textures[i], m_rtts);
 					m_gl_sampler_states[i].apply(rsx::method_registers.fragment_textures[i]);
 
 					GLenum target = get_gl_target_for_texture(rsx::method_registers.fragment_textures[i]);
-					glActiveTexture(GL_TEXTURE0 + i);
 					glBindTexture(target, sampler_state->image_handle);
 				}
 				else
@@ -394,9 +395,9 @@ void GLGSRender::end()
 
 				if (rsx::method_registers.vertex_textures[i].enabled())
 				{
-					*sampler_state = m_gl_texture_cache.upload_texture(unused, rsx::method_registers.vertex_textures[i], m_rtts);
-
 					glActiveTexture(GL_TEXTURE0 + texture_index);
+
+					*sampler_state = m_gl_texture_cache.upload_texture(unused, rsx::method_registers.vertex_textures[i], m_rtts);
 					glBindTexture(GL_TEXTURE_2D, static_cast<gl::texture_cache::sampled_image_descriptor*>(vs_sampler_state[i].get())->image_handle);
 				}
 				else
@@ -1254,7 +1255,13 @@ void GLGSRender::on_notify_memory_unmapped(u32 address_base, u32 size)
 {
 	//Discard all memory in that range without bothering with writeback (Force it for strict?)
 	if (m_gl_texture_cache.invalidate_range(address_base, size, true, true, false).violation_handled)
+	{
 		m_gl_texture_cache.purge_dirty();
+		{
+			std::lock_guard<std::mutex> lock(m_sampler_mutex);
+			m_samplers_dirty.store(true);
+		}
+	}
 }
 
 void GLGSRender::do_local_task()
@@ -1301,6 +1308,7 @@ void GLGSRender::synchronize_buffers()
 
 bool GLGSRender::scaled_image_from_memory(rsx::blit_src_info& src, rsx::blit_dst_info& dst, bool interpolate)
 {
+	m_samplers_dirty.store(true);
 	return m_gl_texture_cache.blit(src, dst, interpolate, m_rtts);
 }
 

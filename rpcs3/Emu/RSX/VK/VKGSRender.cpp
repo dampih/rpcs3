@@ -858,6 +858,10 @@ void VKGSRender::on_notify_memory_unmapped(u32 address_base, u32 size)
 		*m_device, m_secondary_command_buffer, m_memory_type_mapping, m_swap_chain->get_present_queue()).violation_handled)
 	{
 		m_texture_cache.purge_dirty();
+		{
+			std::lock_guard<std::mutex> lock(m_sampler_mutex);
+			m_samplers_dirty.store(true);
+		}
 	}
 }
 
@@ -1034,9 +1038,6 @@ void VKGSRender::end()
 		{
 			if (m_samplers_dirty || m_textures_dirty[i])
 			{
-				if (fs_sampler_handles[i])
-					m_current_frame->samplers_to_clean.push_back(std::move(fs_sampler_handles[i]));
-
 				if (!fs_sampler_state[i])
 					fs_sampler_state[i] = std::make_unique<vk::texture_cache::sampled_image_descriptor>();
 
@@ -1049,10 +1050,19 @@ void VKGSRender::end()
 					const u32 texture_format = rsx::method_registers.fragment_textures[i].format() & ~(CELL_GCM_TEXTURE_UN | CELL_GCM_TEXTURE_LN);
 					VkCompareOp depth_compare = fs_sampler_state[i]->is_depth_texture ? vk::get_compare_func((rsx::comparison_function)rsx::method_registers.fragment_textures[i].zfunc(), true) : VK_COMPARE_OP_NEVER;
 
+					bool replace = !fs_sampler_handles[i];
 					VkFilter min_filter;
 					VkSamplerMipmapMode mip_mode;
-					float min_lod = 0.f, max_lod = 0.f;
-					float lod_bias = 0.f;
+					f32 min_lod = 0.f, max_lod = 0.f;
+					f32 lod_bias = 0.f;
+
+					const f32 af_level = g_cfg.video.anisotropic_level_override > 0 ? g_cfg.video.anisotropic_level_override : vk::max_aniso(rsx::method_registers.fragment_textures[i].max_aniso());
+					const auto wrap_s = vk::vk_wrap_mode(rsx::method_registers.fragment_textures[i].wrap_s());
+					const auto wrap_t = vk::vk_wrap_mode(rsx::method_registers.fragment_textures[i].wrap_t());
+					const auto wrap_r = vk::vk_wrap_mode(rsx::method_registers.fragment_textures[i].wrap_r());
+					const auto unnormalized_coords = !!(rsx::method_registers.fragment_textures[i].format() & CELL_GCM_TEXTURE_UN);
+					const auto mag_filter = vk::get_mag_filter(rsx::method_registers.fragment_textures[i].mag_filter());
+					const auto border_color = vk::get_border_color(rsx::method_registers.fragment_textures[i].border_color());
 
 					std::tie(min_filter, mip_mode) = vk::get_min_filter_and_mip(rsx::method_registers.fragment_textures[i].min_filter());
 
@@ -1067,14 +1077,21 @@ void VKGSRender::end()
 						mip_mode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
 					}
 
-					f32 af_level = g_cfg.video.anisotropic_level_override > 0 ? g_cfg.video.anisotropic_level_override : vk::max_aniso(rsx::method_registers.fragment_textures[i].max_aniso());
-					fs_sampler_handles[i] = std::make_unique<vk::sampler>(
-						*m_device,
-						vk::vk_wrap_mode(rsx::method_registers.fragment_textures[i].wrap_s()), vk::vk_wrap_mode(rsx::method_registers.fragment_textures[i].wrap_t()), vk::vk_wrap_mode(rsx::method_registers.fragment_textures[i].wrap_r()),
-						!!(rsx::method_registers.fragment_textures[i].format() & CELL_GCM_TEXTURE_UN),
-						lod_bias, af_level, min_lod, max_lod,
-						min_filter, vk::get_mag_filter(rsx::method_registers.fragment_textures[i].mag_filter()), mip_mode, vk::get_border_color(rsx::method_registers.fragment_textures[i].border_color()),
-						fs_sampler_state[i]->is_depth_texture, depth_compare);
+					if (fs_sampler_handles[i])
+					{
+						if (!fs_sampler_handles[i]->matches(wrap_s, wrap_t, wrap_r, unnormalized_coords, lod_bias, af_level, min_lod, max_lod,
+							min_filter, mag_filter, mip_mode, border_color, fs_sampler_state[i]->is_depth_texture, depth_compare))
+						{
+							m_current_frame->samplers_to_clean.push_back(std::move(fs_sampler_handles[i]));
+							replace = true;
+						}
+					}
+
+					if (replace)
+					{
+						fs_sampler_handles[i] = std::make_unique<vk::sampler>(*m_device, wrap_s, wrap_t, wrap_r, unnormalized_coords, lod_bias, af_level, min_lod, max_lod,
+							min_filter, mag_filter, mip_mode, border_color, fs_sampler_state[i]->is_depth_texture, depth_compare);
+					}
 				}
 				else
 				{
@@ -1091,9 +1108,6 @@ void VKGSRender::end()
 
 			if (m_samplers_dirty || m_vertex_textures_dirty[i])
 			{
-				if (vs_sampler_handles[i])
-					m_current_frame->samplers_to_clean.push_back(std::move(vs_sampler_handles[i]));
-
 				if (!vs_sampler_state[i])
 					vs_sampler_state[i] = std::make_unique<vk::texture_cache::sampled_image_descriptor>();
 
@@ -1103,13 +1117,31 @@ void VKGSRender::end()
 				{
 					*sampler_state = m_texture_cache._upload_texture(*m_current_command_buffer, rsx::method_registers.vertex_textures[i], m_rtts);
 
-					vs_sampler_handles[i] = std::make_unique<vk::sampler>(
-						*m_device,
-						VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT,
-						!!(rsx::method_registers.vertex_textures[i].format() & CELL_GCM_TEXTURE_UN),
-						0.f, 1.f, (f32)rsx::method_registers.vertex_textures[i].min_lod(), (f32)rsx::method_registers.vertex_textures[i].max_lod(),
-						VK_FILTER_NEAREST, VK_FILTER_NEAREST, VK_SAMPLER_MIPMAP_MODE_NEAREST, vk::get_border_color(rsx::method_registers.vertex_textures[i].border_color())
-						);
+					bool replace = !vs_sampler_handles[i];
+					const VkBool32 unnormalized_coords = !!(rsx::method_registers.vertex_textures[i].format() & CELL_GCM_TEXTURE_UN);
+					const auto min_lod = (f32)rsx::method_registers.vertex_textures[i].min_lod();
+					const auto max_lod = (f32)rsx::method_registers.vertex_textures[i].max_lod();
+					const auto border_color = vk::get_border_color(rsx::method_registers.vertex_textures[i].border_color());
+
+					if (vs_sampler_handles[i])
+					{
+						if (!vs_sampler_handles[i]->matches(VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT,
+							unnormalized_coords, 0.f, 1.f, min_lod, max_lod, VK_FILTER_NEAREST, VK_FILTER_NEAREST, VK_SAMPLER_MIPMAP_MODE_NEAREST, border_color))
+						{
+							m_current_frame->samplers_to_clean.push_back(std::move(vs_sampler_handles[i]));
+							replace = true;
+						}
+					}
+
+					if (replace)
+					{
+						vs_sampler_handles[i] = std::make_unique<vk::sampler>(
+							*m_device,
+							VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT,
+							unnormalized_coords,
+							0.f, 1.f, min_lod, max_lod,
+							VK_FILTER_NEAREST, VK_FILTER_NEAREST, VK_SAMPLER_MIPMAP_MODE_NEAREST, border_color);
+					}
 				}
 				else
 					*sampler_state = {};
@@ -2770,6 +2802,8 @@ bool VKGSRender::scaled_image_from_memory(rsx::blit_src_info& src, rsx::blit_dst
 
 	auto result = m_texture_cache.blit(src, dst, interpolate, m_rtts, *m_current_command_buffer);
 	m_current_command_buffer->begin();
+
+	m_samplers_dirty.store(true);
 
 	return result;
 }
