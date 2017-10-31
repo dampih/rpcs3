@@ -591,6 +591,15 @@ namespace rsx
 				region.set_dirty(false);
 				no_access_range = region.get_min_max(no_access_range);
 			}
+			else
+			{
+				if (region.get_context() != texture_upload_context::framebuffer_storage)
+				{
+					//This space was being used for other purposes other than framebuffer storage
+					//Delete used resources before attaching it to framebuffer memory
+					free_texture_section(region);
+				}
+			}
 
 			region.protect(utils::protection::no);
 			region.create(width, height, 1, 1, nullptr, image, pitch, false, std::forward<Args>(extras)...);
@@ -902,6 +911,8 @@ namespace rsx
 
 						return{ texptr->get_view(), texture_upload_context::framebuffer_storage, false, internal_scale };
 					}
+					else
+						m_rtts.invalidate_surface_address(texaddr, false);
 				}
 
 				if (auto texptr = m_rtts.get_texture_from_depth_stencil_if_applicable(texaddr))
@@ -928,6 +939,8 @@ namespace rsx
 
 						return{ texptr->get_view(), texture_upload_context::framebuffer_storage, true, internal_scale };
 					}
+					else
+						m_rtts.invalidate_surface_address(texaddr, true);
 				}
 			}
 
@@ -971,10 +984,14 @@ namespace rsx
 				const u32 internal_width = (const u32)(tex_width * internal_scale);
 
 				const auto rsc = m_rtts.get_surface_subresource_if_applicable(texaddr, internal_width, tex_height, tex_pitch, true);
-				if (rsc.surface/* && test_framebuffer(texaddr)*/)
+				if (rsc.surface)
 				{
 					//TODO: Check that this region is not cpu-dirty before doing a copy
-					if (extended_dimension != rsx::texture_dimension_extended::texture_dimension_2d)
+					if (!test_framebuffer(texaddr))
+					{
+						m_rtts.invalidate_surface_address(texaddr, rsc.is_depth_surface);
+					}
+					else if (extended_dimension != rsx::texture_dimension_extended::texture_dimension_2d)
 					{
 						LOG_ERROR(RSX, "Sampling of RTT region as non-2D texture! addr=0x%x, Type=%d, dims=%dx%d",
 							texaddr, (u8)tex.get_extended_texture_dimension(), tex.width(), tex.height());

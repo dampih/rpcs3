@@ -865,6 +865,19 @@ void VKGSRender::on_notify_memory_unmapped(u32 address_base, u32 size)
 	}
 }
 
+void VKGSRender::notify_tile_unbound(u32 tile)
+{
+	//TODO: Handle texture writeback
+	//u32 addr = rsx::get_address(tiles[tile].offset, tiles[tile].location);
+	//on_notify_memory_unmapped(addr, tiles[tile].size);
+	//m_rtts.invalidate_surface_address(addr, false);
+
+	{
+		std::lock_guard<std::mutex> lock(m_sampler_mutex);
+		m_samplers_dirty.store(true);
+	}
+}
+
 void VKGSRender::begin()
 {
 	rsx::thread::begin();
@@ -2806,12 +2819,4 @@ bool VKGSRender::scaled_image_from_memory(rsx::blit_src_info& src, rsx::blit_dst
 	m_samplers_dirty.store(true);
 
 	return result;
-}
-
-void VKGSRender::notify_tile_unbound(u32 tile)
-{
-	//TODO: Handle texture writeback
-	//u32 addr = rsx::get_address(tiles[tile].offset, tiles[tile].location);
-	//on_notify_memory_unmapped(addr, tiles[tile].size);
-	//m_rtts.invalidate_surface_address(addr, false);
 }
