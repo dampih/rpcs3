@@ -463,6 +463,14 @@ namespace rsx
 			}
 		}
 
+		/**
+		 * Scaling helpers
+		 * - get_native_dimensions() returns w and h for the native texture given rsx dimensions
+		 *   on rsx a 512x512 texture with 4x AA is treated as a 1024x1024 texture for example
+		 * - get_rsx_dimensions() inverse, return rsx w and h given a real texture w and h
+		 * - get_internal_scaling_x/y() returns a scaling factor to be multiplied by 1/size
+		 *   when sampling with unnormalized coordinates. tcoords passed to rsx will be in rsx dimensions
+		 */
 		template <typename T, typename U>
 		inline void get_native_dimensions(T &width, T &height, T rsx_pitch, U surface)
 		{
@@ -510,7 +518,7 @@ namespace rsx
 			case rsx::surface_antialiasing::diagonal_centered_2_samples:
 			case rsx::surface_antialiasing::square_centered_4_samples:
 			case rsx::surface_antialiasing::square_rotated_4_samples:
-				return 2.f;
+				return 0.5f;
 			}
 		}
 
@@ -525,7 +533,7 @@ namespace rsx
 				return 1.f;
 			case rsx::surface_antialiasing::square_centered_4_samples:
 			case rsx::surface_antialiasing::square_rotated_4_samples:
-				return 2.f;
+				return 0.5f;
 			}
 		}
 
