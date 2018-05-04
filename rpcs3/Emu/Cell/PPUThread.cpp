@@ -9,6 +9,7 @@
 #include "PPUInterpreter.h"
 #include "PPUAnalyser.h"
 #include "PPUModule.h"
+#include "SPURecompiler.h"
 #include "lv2/sys_sync.h"
 #include "lv2/sys_prx.h"
 #include "Utilities/GDBDebugServer.h"
@@ -1085,6 +1086,21 @@ extern void ppu_initialize()
 	{
 		return;
 	}
+
+	// New PPU cache location
+	const std::string ppu_cache = fmt::format("%sdata/%s/ppu-%s-%s/",
+		fs::get_config_dir(),
+		Emu.GetTitleID(),
+		fmt::base57(_main->sha1),
+		Emu.GetBoot().substr(Emu.GetBoot().find_last_of('/') + 1));
+
+	if (!fs::create_path(ppu_cache))
+	{
+		fmt::throw_exception("Failed to create cache directory: %s (%s)", ppu_cache, fs::g_tls_error);
+	}
+
+	// Initialize SPU cache
+	spu_cache::initialize(ppu_cache);
 
 	// Initialize main module
 	ppu_initialize(*_main);

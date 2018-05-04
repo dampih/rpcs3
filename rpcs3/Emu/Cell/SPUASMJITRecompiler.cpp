@@ -57,6 +57,7 @@ spu_function_t spu_recompiler::get(u32 lsa)
 	// Initialize if necessary
 	if (!m_spurt)
 	{
+		m_cache = fxm::get<spu_cache>();
 		m_spurt = fxm::get_always<spu_runtime>();
 	}
 
@@ -64,11 +65,12 @@ spu_function_t spu_recompiler::get(u32 lsa)
 	return m_spurt->m_dispatcher[lsa / 4];
 }
 
-spu_function_t spu_recompiler::compile(const std::vector<u32>& func)
+spu_function_t spu_recompiler::compile(std::vector<u32>&& func_rv)
 {
 	// Initialize if necessary
 	if (!m_spurt)
 	{
+		m_cache = fxm::get<spu_cache>();
 		m_spurt = fxm::get_always<spu_runtime>();
 	}
 
@@ -80,15 +82,17 @@ spu_function_t spu_recompiler::compile(const std::vector<u32>& func)
 		lock.lock();
 	}
 
-	// Try to find existing function
-	{
-		const auto found = m_spurt->m_map.find(func);
+	// Try to find existing function, register new one if necessary
+	const auto fn_info = m_spurt->m_map.emplace(std::move(func_rv), nullptr);
 
-		if (found != m_spurt->m_map.end() && found->second)
-		{
-			return found->second;
-		}
+	auto& fn_location = fn_info.first->second;
+
+	if (fn_location)
+	{
+		return fn_location;
 	}
+
+	auto& func = fn_info.first->first;
 
 	using namespace asmjit;
 
@@ -811,7 +815,7 @@ spu_function_t spu_recompiler::compile(const std::vector<u32>& func)
 	}
 
 	// Register function
-	m_spurt->m_map[func] = fn;
+	fn_location = fn;
 
 	// Generate a dispatcher (übertrampoline)
 	std::vector<u32> addrv{func[0]};
@@ -1041,6 +1045,11 @@ spu_function_t spu_recompiler::compile(const std::vector<u32>& func)
 
 		// Append log file
 		fs::file(Emu.GetCachePath() + "SPUJIT.log", fs::write + fs::append).write(log);
+	}
+
+	if (m_cache)
+	{
+		m_cache->add(func);
 	}
 
 	return fn;
