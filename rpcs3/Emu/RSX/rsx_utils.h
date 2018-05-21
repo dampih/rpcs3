@@ -149,25 +149,25 @@ namespace rsx
 
 				u32 write_offset;
 				u32 write_length;
+				u32 base_offset = 0;
 
 				for (const auto &block : _blocks)
 				{
-					const u32 base_offset = u32(src - io_cache.data());
-					const u32 end = base_offset + block.second;
+					const u32 block_end = base_offset + block.second;
 
-					if (offset >= base_offset && offset < end)
+					if (offset >= base_offset && offset < block_end)
 					{
 						// Head
 						write_offset = (offset - base_offset);
 						write_length = std::min<u32>(block.second - write_offset, remaining_bytes);
 					}
-					else if (base_offset > offset && end <= write_end)
+					else if (base_offset > offset && block_end <= write_end)
 					{
 						// Completely spanned
 						write_offset = 0;
 						write_length = block.second;
 					}
-					else if (base_offset > offset && write_end < end)
+					else if (base_offset > offset && write_end < block_end)
 					{
 						// Tail
 						write_offset = 0;
@@ -175,16 +175,21 @@ namespace rsx
 					}
 					else
 					{
-						continue;
+						// No overlap; skip
+						write_length = 0;
 					}
 
-					memcpy(block.first.get() + write_offset, src + write_offset, write_length);
-					src += block.second;
+					if (write_length)
+					{
+						memcpy(block.first.get() + write_offset, src + (base_offset + write_offset), write_length);
 
-					verify (HERE), write_length <= remaining_bytes;
-					remaining_bytes -= write_length;
-					if (!remaining_bytes)
-						break;
+						verify(HERE), write_length <= remaining_bytes;
+						remaining_bytes -= write_length;
+						if (!remaining_bytes)
+							break;
+					}
+
+					base_offset += block.second;
 				}
 			}
 		}
