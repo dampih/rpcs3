@@ -8,7 +8,30 @@
 
 extern logs::channel sys_io;
 
-s32 cellPadInit(u32 max_connect)
+template<>
+void fmt_class_string<CellPadError>::format(std::string& out, u64 arg)
+{
+	format_enum(out, arg, [](auto error)
+	{
+		switch (error)
+		{
+			STR_CASE(CELL_PAD_ERROR_FATAL);
+			STR_CASE(CELL_PAD_ERROR_INVALID_PARAMETER);
+			STR_CASE(CELL_PAD_ERROR_ALREADY_INITIALIZED);
+			STR_CASE(CELL_PAD_ERROR_UNINITIALIZED);
+			STR_CASE(CELL_PAD_ERROR_RESOURCE_ALLOCATION_FAILED);
+			STR_CASE(CELL_PAD_ERROR_DATA_READ_FAILED);
+			STR_CASE(CELL_PAD_ERROR_NO_DEVICE);
+			STR_CASE(CELL_PAD_ERROR_UNSUPPORTED_GAMEPAD);
+			STR_CASE(CELL_PAD_ERROR_TOO_MANY_DEVICES);
+			STR_CASE(CELL_PAD_ERROR_EBUSY);
+		}
+
+		return unknown;
+	});
+}
+
+error_code cellPadInit(u32 max_connect)
 {
 	sys_io.warning("cellPadInit(max_connect=%d)", max_connect);
 
@@ -17,12 +40,15 @@ s32 cellPadInit(u32 max_connect)
 	if (!handler)
 		return CELL_PAD_ERROR_ALREADY_INITIALIZED;
 
-	handler->Init(std::min(max_connect, CELL_PAD_MAX_PORT_NUM));
+	if (max_connect == 0 || max_connect > CELL_MAX_PADS)
+		return CELL_PAD_ERROR_INVALID_PARAMETER;
+
+	handler->Init(std::min(max_connect, (u32)CELL_PAD_MAX_PORT_NUM));
 
 	return CELL_OK;
 }
 
-s32 cellPadEnd()
+error_code cellPadEnd()
 {
 	sys_io.notice("cellPadEnd()");
 
@@ -32,7 +58,7 @@ s32 cellPadEnd()
 	return CELL_OK;
 }
 
-s32 cellPadClearBuf(u32 port_no)
+error_code cellPadClearBuf(u32 port_no)
 {
 	sys_io.trace("cellPadClearBuf(port_no=%d)", port_no);
 
@@ -41,19 +67,21 @@ s32 cellPadClearBuf(u32 port_no)
 	if (!handler)
 		return CELL_PAD_ERROR_UNINITIALIZED;
 
-	const PadInfo& rinfo = handler->GetInfo();
-
-	if (port_no >= rinfo.max_connect)
+	if (port_no >= CELL_MAX_PADS)
 		return CELL_PAD_ERROR_INVALID_PARAMETER;
 
-	//Set 'm_buffer_cleared' to force a resend of everything
-	//might as well also reset everything in our pad 'buffer' to nothing as well
-
 	const auto& pads = handler->GetPads();
+
+	if (port_no >= pads.size() || port_no >= handler->GetInfo().max_connect)
+		return CELL_PAD_ERROR_NO_DEVICE;
+
 	const auto pad = pads[port_no];
 
 	if (!(pad->m_port_status & CELL_PAD_STATUS_CONNECTED))
 		return CELL_PAD_ERROR_NO_DEVICE;
+
+	//Set 'm_buffer_cleared' to force a resend of everything
+	//might as well also reset everything in our pad 'buffer' to nothing as well
 
 	pad->m_buffer_cleared = true;
 	pad->m_analog_left_x = pad->m_analog_left_y = pad->m_analog_right_x = pad->m_analog_right_y = 128;
@@ -70,7 +98,7 @@ s32 cellPadClearBuf(u32 port_no)
 	return CELL_OK;
 }
 
-s32 cellPadGetData(u32 port_no, vm::ptr<CellPadData> data)
+error_code cellPadGetData(u32 port_no, vm::ptr<CellPadData> data)
 {
 	sys_io.trace("cellPadGetData(port_no=%d, data=*0x%x)", port_no, data);
 
@@ -79,15 +107,16 @@ s32 cellPadGetData(u32 port_no, vm::ptr<CellPadData> data)
 	if (!handler)
 		return CELL_PAD_ERROR_UNINITIALIZED;
 
-	const PadInfo& rinfo = handler->GetInfo();
-
-	if (port_no >= rinfo.max_connect || !data)
+	if (port_no >= CELL_MAX_PADS || !data)
 		return CELL_PAD_ERROR_INVALID_PARAMETER;
 
 	const auto& pads = handler->GetPads();
+
+	if (port_no >= pads.size() || port_no >= handler->GetInfo().max_connect)
+		return CELL_PAD_ERROR_NO_DEVICE;
+
 	const auto pad = pads[port_no];
 
-	//We have a choice here of NO_DEVICE or READ_FAILED...lets try no device for now
 	if (!(pad->m_port_status & CELL_PAD_STATUS_CONNECTED))
 		return CELL_PAD_ERROR_NO_DEVICE;
 
@@ -310,7 +339,7 @@ s32 cellPadGetData(u32 port_no, vm::ptr<CellPadData> data)
 	return CELL_OK;
 }
 
-s32 cellPadPeriphGetInfo(vm::ptr<CellPadPeriphInfo> info)
+error_code cellPadPeriphGetInfo(vm::ptr<CellPadPeriphInfo> info)
 {
 	sys_io.trace("cellPadPeriphGetInfo(info=*0x%x)", info);
 
@@ -350,7 +379,7 @@ s32 cellPadPeriphGetInfo(vm::ptr<CellPadPeriphInfo> info)
 	return CELL_OK;
 }
 
-s32 cellPadPeriphGetData(u32 port_no, vm::ptr<CellPadPeriphData> data)
+error_code cellPadPeriphGetData(u32 port_no, vm::ptr<CellPadPeriphData> data)
 {
 	sys_io.trace("cellPadPeriphGetData(port_no=%d, data=*0x%x)", port_no, data);
 	const auto handler = fxm::get<pad_thread>();
@@ -358,12 +387,15 @@ s32 cellPadPeriphGetData(u32 port_no, vm::ptr<CellPadPeriphData> data)
 	if (!handler)
 		return CELL_PAD_ERROR_UNINITIALIZED;
 
-	const PadInfo& rinfo = handler->GetInfo();
-
-	if (port_no >= rinfo.max_connect || !data)
+	// port_no can only be 0-6 in this function
+	if (port_no >= CELL_PAD_MAX_PORT_NUM || !data)
 		return CELL_PAD_ERROR_INVALID_PARAMETER;
 
 	const auto& pads = handler->GetPads();
+
+	if (port_no >= pads.size() || port_no >= handler->GetInfo().max_connect)
+		return CELL_PAD_ERROR_NO_DEVICE;
+
 	const auto pad = pads[port_no];
 
 	if (!(pad->m_port_status & CELL_PAD_STATUS_CONNECTED))
@@ -375,26 +407,50 @@ s32 cellPadPeriphGetData(u32 port_no, vm::ptr<CellPadPeriphData> data)
 	return cellPadGetData(port_no, vm::get_addr(&data->cellpad_data));
 }
 
-s32 cellPadGetRawData(u32 port_no, vm::ptr<CellPadData> data)
+error_code cellPadGetRawData(u32 port_no, vm::ptr<CellPadData> data)
 {
-	fmt::throw_exception("Unimplemented" HERE);
-}
-
-s32 cellPadGetDataExtra(u32 port_no, vm::ptr<u32> device_type, vm::ptr<CellPadData> data)
-{
-	sys_io.trace("cellPadGetDataExtra(port_no=%d, device_type=*0x%x, device_type=*0x%x)", port_no, device_type, data);
+	sys_io.todo("cellPadGetRawData(port_no=%d, data=*0x%x)", port_no, data);
 
 	const auto handler = fxm::get<pad_thread>();
 
 	if (!handler)
 		return CELL_PAD_ERROR_UNINITIALIZED;
 
-	const PadInfo& rinfo = handler->GetInfo();
-
-	if (port_no >= rinfo.max_connect || !device_type || !data)
+	if (port_no >= CELL_MAX_PADS || !data) // may be CELL_PAD_MAX_PORT_NUM instead
 		return CELL_PAD_ERROR_INVALID_PARAMETER;
 
 	const auto& pads = handler->GetPads();
+
+	if (port_no >= pads.size() || port_no >= handler->GetInfo().max_connect)
+		return CELL_PAD_ERROR_NO_DEVICE;
+
+	const auto pad = pads[port_no];
+
+	if (!(pad->m_port_status & CELL_PAD_STATUS_CONNECTED))
+		return CELL_PAD_ERROR_NO_DEVICE;
+
+	// ?
+
+	return CELL_OK;
+}
+
+error_code cellPadGetDataExtra(u32 port_no, vm::ptr<u32> device_type, vm::ptr<CellPadData> data)
+{
+	sys_io.trace("cellPadGetDataExtra(port_no=%d, device_type=*0x%x, data=*0x%x)", port_no, device_type, data);
+
+	const auto handler = fxm::get<pad_thread>();
+
+	if (!handler)
+		return CELL_PAD_ERROR_UNINITIALIZED;
+
+	if (port_no >= CELL_MAX_PADS || !data)
+		return CELL_PAD_ERROR_INVALID_PARAMETER;
+
+	const auto& pads = handler->GetPads();
+
+	if (port_no >= pads.size() || port_no >= handler->GetInfo().max_connect)
+		return CELL_PAD_ERROR_NO_DEVICE;
+
 	const auto pad = pads[port_no];
 
 	if (!(pad->m_port_status & CELL_PAD_STATUS_CONNECTED))
@@ -403,7 +459,10 @@ s32 cellPadGetDataExtra(u32 port_no, vm::ptr<u32> device_type, vm::ptr<CellPadDa
 	// TODO: This is used just to get data from a BD/CEC remote,
 	// but if the port isnt a remote, device type is set to 0 and just regular cellPadGetData is returned
 
-	*device_type = 0;
+	if (device_type) // no error is returned on NULL
+	{
+		*device_type = 0;
+	}
 
 	// set BD data before just incase
 	data->button[24] = 0x0;
@@ -412,7 +471,7 @@ s32 cellPadGetDataExtra(u32 port_no, vm::ptr<u32> device_type, vm::ptr<CellPadDa
 	return cellPadGetData(port_no, data);
 }
 
-s32 cellPadSetActDirect(u32 port_no, vm::ptr<CellPadActParam> param)
+error_code cellPadSetActDirect(u32 port_no, vm::ptr<CellPadActParam> param)
 {
 	sys_io.trace("cellPadSetActDirect(port_no=%d, param=*0x%x)", port_no, param);
 
@@ -421,23 +480,32 @@ s32 cellPadSetActDirect(u32 port_no, vm::ptr<CellPadActParam> param)
 	if (!handler)
 		return CELL_PAD_ERROR_UNINITIALIZED;
 
-	const PadInfo& rinfo = handler->GetInfo();
-
-	if (port_no >= rinfo.max_connect || !param)
+	if (port_no >= CELL_MAX_PADS || !param)
 		return CELL_PAD_ERROR_INVALID_PARAMETER;
 
+	for (int i = 0; i < 6; i++)
+		if (param->reserved[i])
+			return CELL_PAD_ERROR_INVALID_PARAMETER;
+
 	const auto& pads = handler->GetPads();
+
+	if (port_no >= pads.size() || port_no >= handler->GetInfo().max_connect)
+		return CELL_PAD_ERROR_NO_DEVICE;
+
 	const auto pad = pads[port_no];
 
 	if (!(pad->m_port_status & CELL_PAD_STATUS_CONNECTED))
 		return CELL_PAD_ERROR_NO_DEVICE;
+
+	if (!(pad->m_device_capability & CELL_PAD_CAPABILITY_ACTUATOR))
+		return CELL_PAD_ERROR_UNSUPPORTED_GAMEPAD;
 
 	handler->SetRumble(port_no, param->motor[1], param->motor[0] > 0);
 
 	return CELL_OK;
 }
 
-s32 cellPadGetInfo(vm::ptr<CellPadInfo> info)
+error_code cellPadGetInfo(vm::ptr<CellPadInfo> info)
 {
 	sys_io.trace("cellPadGetInfo(info=*0x%x)", info);
 
@@ -472,7 +540,7 @@ s32 cellPadGetInfo(vm::ptr<CellPadInfo> info)
 	return CELL_OK;
 }
 
-s32 cellPadGetInfo2(vm::ptr<CellPadInfo2> info)
+error_code cellPadGetInfo2(vm::ptr<CellPadInfo2> info)
 {
 	sys_io.trace("cellPadGetInfo2(info=*0x%x)", info);
 
@@ -508,7 +576,7 @@ s32 cellPadGetInfo2(vm::ptr<CellPadInfo2> info)
 	return CELL_OK;
 }
 
-s32 cellPadGetCapabilityInfo(u32 port_no, vm::ptr<CellCapabilityInfo> info)
+error_code cellPadGetCapabilityInfo(u32 port_no, vm::ptr<CellCapabilityInfo> info)
 {
 	sys_io.trace("cellPadGetCapabilityInfo(port_no=%d, data_addr:=0x%x)", port_no, info.addr());
 
@@ -517,24 +585,26 @@ s32 cellPadGetCapabilityInfo(u32 port_no, vm::ptr<CellCapabilityInfo> info)
 	if (!handler)
 		return CELL_PAD_ERROR_UNINITIALIZED;
 
-	const PadInfo& rinfo = handler->GetInfo();
-
-	if (port_no >= rinfo.max_connect || !info)
+	if (port_no >= CELL_MAX_PADS || !info) // may be CELL_PAD_MAX_PORT_NUM instead
 		return CELL_PAD_ERROR_INVALID_PARAMETER;
 
 	const auto& pads = handler->GetPads();
+
+	if (port_no >= pads.size() || port_no >= handler->GetInfo().max_connect)
+		return CELL_PAD_ERROR_NO_DEVICE;
+
 	const auto pad = pads[port_no];
 
 	if (!(pad->m_port_status & CELL_PAD_STATUS_CONNECTED))
 		return CELL_PAD_ERROR_NO_DEVICE;
 
 	//Should return the same as device capability mask, psl1ght has it backwards in pad->h
-	info->info[0] = pad->m_device_capability;
+	info->info[port_no] = pad->m_device_capability;
 
 	return CELL_OK;
 }
 
-s32 cellPadSetPortSetting(u32 port_no, u32 port_setting)
+error_code cellPadSetPortSetting(u32 port_no, u32 port_setting)
 {
 	sys_io.trace("cellPadSetPortSetting(port_no=%d, port_setting=0x%x)", port_no, port_setting);
 
@@ -543,23 +613,22 @@ s32 cellPadSetPortSetting(u32 port_no, u32 port_setting)
 	if (!handler)
 		return CELL_PAD_ERROR_UNINITIALIZED;
 
-	const PadInfo& rinfo = handler->GetInfo();
-
-	if (port_no >= rinfo.max_connect)
+	if (port_no >= CELL_MAX_PADS)
 		return CELL_PAD_ERROR_INVALID_PARAMETER;
 
 	const auto& pads = handler->GetPads();
+
+	// CELL_PAD_ERROR_NO_DEVICE does not seem to be returned in this case.
+	if (port_no >= pads.size() || port_no >= handler->GetInfo().max_connect)
+		return CELL_OK;
+
 	const auto pad = pads[port_no];
-
 	pad->m_port_setting = port_setting;
-
-	if (!(pad->m_port_status & CELL_PAD_STATUS_CONNECTED))
-		return CELL_PAD_ERROR_NO_DEVICE;
 
 	return CELL_OK;
 }
 
-s32 cellPadInfoPressMode(u32 port_no)
+error_code cellPadInfoPressMode(u32 port_no)
 {
 	sys_io.trace("cellPadInfoPressMode(port_no=%d)", port_no);
 
@@ -568,12 +637,14 @@ s32 cellPadInfoPressMode(u32 port_no)
 	if (!handler)
 		return CELL_PAD_ERROR_UNINITIALIZED;
 
-	const PadInfo& rinfo = handler->GetInfo();
-
-	if (port_no >= rinfo.max_connect)
+	if (port_no >= CELL_MAX_PADS) // may be CELL_PAD_MAX_PORT_NUM instead
 		return CELL_PAD_ERROR_INVALID_PARAMETER;
 
 	const auto& pads = handler->GetPads();
+
+	if (port_no >= pads.size() || port_no >= handler->GetInfo().max_connect)
+		return CELL_PAD_ERROR_NO_DEVICE;
+
 	const auto pad = pads[port_no];
 
 	if (!(pad->m_port_status & CELL_PAD_STATUS_CONNECTED))
@@ -582,7 +653,7 @@ s32 cellPadInfoPressMode(u32 port_no)
 	return (pad->m_device_capability & CELL_PAD_CAPABILITY_PRESS_MODE) > 0;
 }
 
-s32 cellPadInfoSensorMode(u32 port_no)
+error_code cellPadInfoSensorMode(u32 port_no)
 {
 	sys_io.trace("cellPadInfoSensorMode(port_no=%d)", port_no);
 
@@ -591,12 +662,14 @@ s32 cellPadInfoSensorMode(u32 port_no)
 	if (!handler)
 		return CELL_PAD_ERROR_UNINITIALIZED;
 
-	const PadInfo& rinfo = handler->GetInfo();
-
-	if (port_no >= rinfo.max_connect)
+	if (port_no >= CELL_MAX_PADS) // may be CELL_PAD_MAX_PORT_NUM instead
 		return CELL_PAD_ERROR_INVALID_PARAMETER;
 
 	const auto& pads = handler->GetPads();
+
+	if (port_no >= pads.size() || port_no >= handler->GetInfo().max_connect)
+		return CELL_PAD_ERROR_NO_DEVICE;
+
 	const auto pad = pads[port_no];
 
 	if (!(pad->m_port_status & CELL_PAD_STATUS_CONNECTED))
@@ -605,7 +678,7 @@ s32 cellPadInfoSensorMode(u32 port_no)
 	return (pad->m_device_capability & CELL_PAD_CAPABILITY_SENSOR_MODE) > 0;
 }
 
-s32 cellPadSetPressMode(u32 port_no, u32 mode)
+error_code cellPadSetPressMode(u32 port_no, u32 mode)
 {
 	sys_io.trace("cellPadSetPressMode(port_no=%d, mode=%d)", port_no, mode);
 
@@ -614,15 +687,14 @@ s32 cellPadSetPressMode(u32 port_no, u32 mode)
 	if (!handler)
 		return CELL_PAD_ERROR_UNINITIALIZED;
 
-	if (mode != 0 && mode != 1)
-		return CELL_PAD_ERROR_INVALID_PARAMETER;
-
-	const PadInfo& rinfo = handler->GetInfo();
-
-	if (port_no >= rinfo.max_connect)
+	if (port_no >= CELL_MAX_PADS) // may be CELL_PAD_MAX_PORT_NUM instead
 		return CELL_PAD_ERROR_INVALID_PARAMETER;
 
 	const auto& pads = handler->GetPads();
+
+	if (port_no >= pads.size() || port_no >= handler->GetInfo().max_connect)
+		return CELL_PAD_ERROR_NO_DEVICE;
+
 	const auto pad = pads[port_no];
 
 	if (mode)
@@ -636,7 +708,7 @@ s32 cellPadSetPressMode(u32 port_no, u32 mode)
 	return CELL_OK;
 }
 
-s32 cellPadSetSensorMode(u32 port_no, u32 mode)
+error_code cellPadSetSensorMode(u32 port_no, u32 mode)
 {
 	sys_io.trace("cellPadSetSensorMode(port_no=%d, mode=%d)", port_no, mode);
 
@@ -645,15 +717,14 @@ s32 cellPadSetSensorMode(u32 port_no, u32 mode)
 	if (!handler)
 		return CELL_PAD_ERROR_UNINITIALIZED;
 
-	if (mode != 0 && mode != 1)
-		return CELL_PAD_ERROR_INVALID_PARAMETER;
-
-	const PadInfo& rinfo = handler->GetInfo();
-
-	if (port_no >= rinfo.max_connect)
+	if (port_no >= CELL_MAX_PADS) // may be CELL_PAD_MAX_PORT_NUM instead
 		return CELL_PAD_ERROR_INVALID_PARAMETER;
 
 	const auto& pads = handler->GetPads();
+
+	if (port_no >= pads.size() || port_no >= handler->GetInfo().max_connect)
+		return CELL_PAD_ERROR_NO_DEVICE;
+
 	const auto pad = pads[port_no];
 
 	if (mode)
@@ -667,7 +738,7 @@ s32 cellPadSetSensorMode(u32 port_no, u32 mode)
 	return CELL_OK;
 }
 
-s32 cellPadLddRegisterController()
+error_code cellPadLddRegisterController()
 {
 	sys_io.todo("cellPadLddRegisterController()");
 
@@ -679,7 +750,7 @@ s32 cellPadLddRegisterController()
 	return CELL_OK;
 }
 
-s32 cellPadLddDataInsert(s32 handle, vm::ptr<CellPadData> data)
+error_code cellPadLddDataInsert(s32 handle, vm::ptr<CellPadData> data)
 {
 	sys_io.todo("cellPadLddDataInsert(handle=%d, data=*0x%x)", handle, data);
 
@@ -688,13 +759,13 @@ s32 cellPadLddDataInsert(s32 handle, vm::ptr<CellPadData> data)
 	if (!handler)
 		return CELL_PAD_ERROR_UNINITIALIZED;
 
-	if (handle < 0 || !data)
+	if (handle < 0 || !data) // data == NULL stalls on decr
 		return CELL_PAD_ERROR_INVALID_PARAMETER;
 
 	return CELL_OK;
 }
 
-s32 cellPadLddGetPortNo(s32 handle)
+error_code cellPadLddGetPortNo(s32 handle)
 {
 	sys_io.todo("cellPadLddGetPortNo(handle=%d)", handle);
 
@@ -706,11 +777,10 @@ s32 cellPadLddGetPortNo(s32 handle)
 	if (!handler)
 		return CELL_PAD_ERROR_UNINITIALIZED;
 
-	// CELL_OK would return port 0 (Nascar [BLUS30932] stopped looking for custom controllers after a few seconds, fixing normal input)
-	return CELL_PAD_ERROR_EBUSY;
+	return CELL_PAD_ERROR_EBUSY; // or CELL_PAD_ERROR_FATAL
 }
 
-s32 cellPadLddUnregisterController(s32 handle)
+error_code cellPadLddUnregisterController(s32 handle)
 {
 	sys_io.todo("cellPadLddUnregisterController(handle=%d)", handle);
 
