@@ -92,7 +92,7 @@ void spu_cache::initialize()
 	}
 
 	// SPU cache file (version + block size type)
-	const std::string loc = _main->cache + u8"spu-§" + fmt::to_lower(g_cfg.core.spu_block_size.to_string()) + "-v4.dat";
+	const std::string loc = _main->cache + u8"spu-§" + fmt::to_lower(g_cfg.core.spu_block_size.to_string()) + "-v5.dat";
 
 	auto cache = std::make_shared<spu_cache>(loc);
 
@@ -588,6 +588,8 @@ std::vector<u32> spu_recompiler_base::block(const be_t<u32>* ls, u32 entry_point
 					if (std::max(jt_abs.size(), jt_rel.size()) * 4 + start <= i)
 					{
 						// Neither type of jump table completes
+						jt_abs.clear();
+						jt_rel.clear();
 						break;
 					}
 				}
@@ -617,6 +619,8 @@ std::vector<u32> spu_recompiler_base::block(const be_t<u32>* ls, u32 entry_point
 						{
 							jt_abs.clear();
 						}
+
+						verify(HERE), jt_abs.size() != jt_rel.size();
 					}
 
 					if (jt_abs.size() >= jt_rel.size())
