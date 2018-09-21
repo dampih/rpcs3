@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "../rsx_cache.h"
 #include "../rsx_utils.h"
@@ -74,11 +74,27 @@ namespace rsx
 		std::deque<u32> read_history;
 
 		u64 cache_tag = 0;
+		u64 last_write_tag = 0;
 
 		memory_read_flags readback_behaviour = memory_read_flags::flush_once;
 		rsx::texture_create_flags view_flags = rsx::texture_create_flags::default_component_order;
 		rsx::texture_upload_context context = rsx::texture_upload_context::shader_read;
 		rsx::texture_dimension_extended image_type = rsx::texture_dimension_extended::texture_dimension_2d;
+
+		void reset(u32 rsx_address, u32 rsx_size)
+		{
+			rsx::protection_policy policy = g_cfg.video.strict_rendering_mode ? rsx::protection_policy::protect_policy_full_range : rsx::protection_policy::protect_policy_conservative;
+			rsx::buffered_section::reset(rsx_address, rsx_size, policy);
+
+			flushed = false;
+			synchronized = false;
+
+			sync_timestamp = 0ull;
+			last_write_tag = 0ull;
+			cache_tag = 0ull;
+
+			// TODO: Fix write tracking and reset stats
+		}
 
 		bool matches(u32 rsx_address, u32 rsx_size)
 		{
@@ -110,9 +126,10 @@ namespace rsx
 			return false;
 		}
 
-		void touch()
+		void touch(u64 tag)
 		{
 			num_writes++;
+			last_write_tag = tag;
 		}
 
 		void reset_write_statistics()
@@ -273,7 +290,7 @@ namespace rsx
 
 			void notify(u32 addr, u32 data_size)
 			{
-				verify(HERE), valid_count >= 0;
+				//verify(HERE), valid_count >= 0;
 
 				const u32 addr_base = addr & ~0xfff;
 				const u32 block_sz = align(addr + data_size, 4096u) - addr_base;
@@ -286,7 +303,7 @@ namespace rsx
 
 			void notify()
 			{
-				verify(HERE), valid_count >= 0;
+				//verify(HERE), valid_count >= 0;
 				valid_count++;
 			}
 
@@ -298,7 +315,7 @@ namespace rsx
 
 			void remove_one()
 			{
-				verify(HERE), valid_count > 0;
+				//verify(HERE), valid_count > 0;
 				valid_count--;
 			}
 
@@ -645,6 +662,47 @@ namespace rsx
 			return result;
 		}
 
+		template <typename ...Args>
+		void flush_set(thrashed_set& data, Args&&... extras)
+		{
+			if (data.sections_to_flush.size() > 1)
+			{
+				// Sort with oldest data first
+				// Ensures that new data tramples older data
+				std::sort(data.sections_to_flush.begin(), data.sections_to_flush.end(), [](const auto& a, const auto& b)
+				{
+					return (a->last_write_tag < b->last_write_tag);
+				});
+			}
+
+			for (auto &surface : data.sections_to_flush)
+			{
+				if (surface->get_memory_read_flags() == rsx::memory_read_flags::flush_always)
+				{
+					// This region is set to always read from itself (unavoidable hard sync)
+					const auto ROP_timestamp = rsx::get_current_renderer()->ROP_sync_timestamp;
+					if (surface->is_synchronized() && ROP_timestamp > surface->get_sync_timestamp())
+					{
+						m_num_cache_mispredictions++;
+						m_num_cache_misses++;
+						surface->copy_texture(true, std::forward<Args>(extras)...);
+					}
+				}
+
+				if (!surface->flush(std::forward<Args>(extras)...))
+				{
+					// Missed address, note this
+					// TODO: Lower severity when successful to keep the cache from overworking
+					record_cache_miss(*surface);
+				}
+
+				m_num_flush_requests++;
+				data.sections_to_unprotect.push_back(surface);
+			}
+
+			data.sections_to_flush.clear();
+		}
+
 		void unprotect_set(thrashed_set& data)
 		{
 			auto release_set = [this](std::vector<section_storage_type*>& _set)
@@ -844,33 +902,9 @@ namespace rsx
 
 								result.sections_to_unprotect.push_back(obj.first);
 							}
-							else if (!allow_flush)
-							{
-								result.sections_to_flush.push_back(obj.first);
-							}
 							else
 							{
-								if (obj.first->get_memory_read_flags() == rsx::memory_read_flags::flush_always)
-								{
-									// This region is set to always read from itself (unavoidable hard sync)
-									const auto ROP_timestamp = rsx::get_current_renderer()->ROP_sync_timestamp;
-									if (obj.first->is_synchronized() && ROP_timestamp > obj.first->get_sync_timestamp())
-									{
-										m_num_cache_mispredictions++;
-										m_num_cache_misses++;
-										obj.first->copy_texture(true, std::forward<Args>(extras)...);
-									}
-								}
-
-								if (!obj.first->flush(std::forward<Args>(extras)...))
-								{
-									//Missed address, note this
-									//TODO: Lower severity when successful to keep the cache from overworking
-									record_cache_miss(*obj.first);
-								}
-
-								m_num_flush_requests++;
-								result.sections_to_unprotect.push_back(obj.first);
+								result.sections_to_flush.push_back(obj.first);
 							}
 
 							continue;
@@ -897,18 +931,24 @@ namespace rsx
 					obj.second->remove_one();
 				}
 
-				if (deferred_flush && result.sections_to_flush.size())
+				if (!result.sections_to_flush.empty())
 				{
-					result.num_flushable = static_cast<int>(result.sections_to_flush.size());
-					result.address_base = address;
-					result.address_range = range;
-					result.cache_tag = m_cache_update_tag.load(std::memory_order_consume);
-					return result;
+					if (deferred_flush)
+					{
+						result.num_flushable = static_cast<int>(result.sections_to_flush.size());
+						result.address_base = address;
+						result.address_range = range;
+						result.cache_tag = m_cache_update_tag.load(std::memory_order_consume);
+						return result;
+					}
+					else
+					{
+						verify(HERE), allow_flush;
+						flush_set(result, std::forward<Args>(extras)...);
+					}
 				}
-				else
-				{
-					unprotect_set(result);
-				}
+
+				unprotect_set(result);
 
 				//Everything has been handled
 				result = {};
@@ -1184,7 +1224,7 @@ namespace rsx
 			region.set_context(texture_upload_context::framebuffer_storage);
 			region.set_image_type(rsx::texture_dimension_extended::texture_dimension_2d);
 			region.set_memory_read_flags(memory_read_flags::flush_always);
-			region.touch();
+			region.touch(m_cache_update_tag);
 
 			m_flush_always_cache[memory_address] = memory_size;
 
@@ -1376,30 +1416,7 @@ namespace rsx
 			if (m_cache_update_tag.load(std::memory_order_consume) == data.cache_tag)
 			{
 				//1. Write memory to cpu side
-				for (auto &tex : data.sections_to_flush)
-				{
-					if (tex->is_locked())
-					{
-						if (tex->get_memory_read_flags() == rsx::memory_read_flags::flush_always)
-						{
-							// This region is set to always read from itself (unavoidable hard sync)
-							const auto ROP_timestamp = rsx::get_current_renderer()->ROP_sync_timestamp;
-							if (tex->is_synchronized() && ROP_timestamp > tex->get_sync_timestamp())
-							{
-								m_num_cache_mispredictions++;
-								m_num_cache_misses++;
-								tex->copy_texture(true, std::forward<Args>(extras)...);
-							}
-						}
-
-						if (!tex->flush(std::forward<Args>(extras)...))
-						{
-							record_cache_miss(*tex);
-						}
-
-						m_num_flush_requests++;
-					}
-				}
+				flush_set(data, std::forward<Args>(extras)...);
 
 				//2. Release all obsolete sections
 				unprotect_set(data);
@@ -1493,8 +1510,8 @@ namespace rsx
 			{
 				auto &range_data = address_range.second;
 
-				if (range_data.valid_count == 0)
-					empty_addresses.push_back(address_range.first);
+				//if (range_data.valid_count == 0)
+					//empty_addresses.push_back(address_range.first);
 
 				for (auto &tex : range_data.data)
 				{
@@ -2218,7 +2235,6 @@ namespace rsx
 			}
 
 			section_storage_type* cached_dest = nullptr;
-			bool invalidate_dst_range = false;
 
 			if (!dst_is_render_target)
 			{
@@ -2265,10 +2281,6 @@ namespace rsx
 
 					max_dst_width = cached_dest->get_width();
 					max_dst_height = cached_dest->get_height();
-				}
-				else if (overlapping_surfaces.size() > 0)
-				{
-					invalidate_dst_range = true;
 				}
 			}
 			else
@@ -2421,11 +2433,6 @@ namespace rsx
 				dest_texture = 0;
 				cached_dest = nullptr;
 			}
-			else if (invalidate_dst_range)
-			{
-				lock.upgrade();
-				invalidate_range_impl_base(dst_address, dst.pitch * dst.height, true, false, true, std::forward<Args>(extras)...);
-			}
 
 			u32 gcm_format;
 			if (is_depth_blit)
@@ -2461,18 +2468,39 @@ namespace rsx
 
 			if (dest_texture == 0)
 			{
-				lock.upgrade();
+				verify(HERE), !dst_is_render_target;
 
-				//render target data is already in correct swizzle layout
+				// Need to calculate the minium required size that will fit the data, anchored on the rsx_address
+				// If the application starts off with an 'inseted' section, the guessed dimensions may not fit!
+				const u32 write_end = dst_address + (dst.pitch * dst.clip_height);
+				const u32 expected_end = dst.rsx_address + (dst.pitch * dst_dimensions.height);
+
+				const u32 section_length = std::max(write_end, expected_end) - dst.rsx_address;
+				dst_dimensions.height = section_length / dst.pitch;
+
+				lock.upgrade();
+				invalidate_range_impl_base(dst.rsx_address, section_length, true, false, true, std::forward<Args>(extras)...);
+
+				const u16 pitch_in_block = dst_is_argb8 ? dst.pitch >> 2 : dst.pitch >> 1;
+				std::vector<rsx_subresource_layout> subresource_layout;
+				rsx_subresource_layout subres = {};
+				subres.width_in_block = dst_dimensions.width;
+				subres.height_in_block = dst_dimensions.height;
+				subres.pitch_in_block = pitch_in_block;
+				subres.depth = 1;
+				subres.data = { (const gsl::byte*)dst.pixels, dst.pitch * dst_dimensions.height };
+				subresource_layout.push_back(subres);
+
+				cached_dest = upload_image_from_cpu(cmd, dst.rsx_address, dst_dimensions.width, dst_dimensions.height, 1, 1, dst.pitch,
+					gcm_format, rsx::texture_upload_context::blit_engine_dst, subresource_layout,
+					rsx::texture_dimension_extended::texture_dimension_2d, false);
+
+				// render target data is already in correct swizzle layout
 				auto channel_order = src_is_render_target ? rsx::texture_create_flags::native_component_order :
 					dst_is_argb8 ? rsx::texture_create_flags::default_component_order :
 					rsx::texture_create_flags::swapped_native_component_order;
 
-				//NOTE: Should upload from cpu instead of creating a blank texture
-				cached_dest = create_new_texture(cmd, dst.rsx_address, dst.pitch * dst_dimensions.height,
-					dst_dimensions.width, dst_dimensions.height, 1, 1,
-					gcm_format, rsx::texture_upload_context::blit_engine_dst, rsx::texture_dimension_extended::texture_dimension_2d,
-					channel_order);
+				enforce_surface_creation_type(*cached_dest, gcm_format, channel_order);
 
 				dest_texture = cached_dest->get_raw_texture();
 				typeless_info.dst_context = texture_upload_context::blit_engine_dst;
@@ -2510,7 +2538,8 @@ namespace rsx
 				verify(HERE), (mem_base + mem_length) <= cached_dest->get_section_size();
 
 				cached_dest->reprotect(utils::protection::no, { mem_base, mem_length });
-				cached_dest->touch();
+				cached_dest->touch(m_cache_update_tag);
+				update_cache_tag();
 			}
 			else
 			{

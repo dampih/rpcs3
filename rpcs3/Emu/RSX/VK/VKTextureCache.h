@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "stdafx.h"
 #include "VKRenderTargets.h"
 #include "VKGSRender.h"
@@ -32,8 +32,7 @@ namespace vk
 			if (length > cpu_address_range)
 				release_dma_resources();
 
-			rsx::protection_policy policy = g_cfg.video.strict_rendering_mode ? rsx::protection_policy::protect_policy_full_range : rsx::protection_policy::protect_policy_conservative;
-			rsx::buffered_section::reset(base, length, policy);
+			rsx::cached_texture_section::reset(base, length);
 		}
 
 		void create(u16 w, u16 h, u16 depth, u16 mipmaps, vk::image *image, u32 rsx_pitch, bool managed, u32 gcm_format, bool pack_swap_bytes = false)
@@ -917,7 +916,10 @@ namespace vk
 				return;
 
 			const VkComponentMapping mapping = apply_component_mapping_flags(gcm_format, expected_flags, rsx::default_remap_vector);
-			section.get_raw_texture()->native_component_map = mapping;
+			auto image = static_cast<vk::viewable_image*>(section.get_raw_texture());
+
+			verify(HERE), image != nullptr;
+			image->set_native_component_layout(mapping);
 
 			section.set_view_flags(expected_flags);
 		}
@@ -983,8 +985,8 @@ namespace vk
 			if (found == m_cache.end())
 				return false;
 
-			if (found->second.valid_count == 0)
-				return false;
+			//if (found->second.valid_count == 0)
+				//return false;
 
 			for (auto& tex : found->second.data)
 			{
