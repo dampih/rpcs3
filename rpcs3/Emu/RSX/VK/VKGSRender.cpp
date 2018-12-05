@@ -1633,7 +1633,6 @@ void VKGSRender::end()
 			}
 			else
 			{
-				LOG_ERROR(RSX, "Texture upload failed to texture index %d. Binding null sampler.", i);
 				m_program->bind_uniform({ vk::null_sampler(), vk::null_image_view(*m_current_command_buffer), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
 					i,
 					::glsl::program_domain::glsl_fragment_program,
