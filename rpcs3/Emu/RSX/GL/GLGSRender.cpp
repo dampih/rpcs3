@@ -401,72 +401,47 @@ void GLGSRender::end()
 	//Bind textures and resolve external copy operations
 	std::chrono::time_point<steady_clock> textures_start = steady_clock::now();
 	void *unused = nullptr;
-	gl::texture_view* view;
 
 	for (int i = 0; i < rsx::limits::fragment_textures_count; ++i)
 	{
-		const auto mask = (1 << i);
-
-		if (current_fp_metadata.referenced_textures_mask & mask)
+		if (current_fp_metadata.referenced_textures_mask & (1 << i))
 		{
-			auto sampler_state = static_cast<gl::texture_cache::sampled_image_descriptor*>(fs_sampler_state[i].get());
-			auto &tex = rsx::method_registers.fragment_textures[i];
-
-			const bool double_assign = !!(current_fragment_program.redirected_textures & mask);
-
 			_SelectTexture(GL_FRAGMENT_TEXTURES_START + i);
 
-			if (tex.enabled())
+			gl::texture_view* view = nullptr;
+			if (rsx::method_registers.fragment_textures[i].enabled())
 			{
-				if (sampler_state->image_handle)
-				{
-					view = sampler_state->image_handle;
-				}
-				else if (sampler_state->external_subresource_desc.external_handle)
+				auto sampler_state = static_cast<gl::texture_cache::sampled_image_descriptor*>(fs_sampler_state[i].get());
+				view = sampler_state->image_handle;
+
+				if (!view && sampler_state->external_subresource_desc.external_handle)
 				{
 					view = m_gl_texture_cache.create_temporary_subresource(unused, sampler_state->external_subresource_desc);
 				}
+			}
 
-				if (LIKELY(view))
+			if (LIKELY(view))
+			{
+				view->bind();
+
+				if (current_fragment_program.redirected_textures & (1 << i))
 				{
-					view->bind();
+					auto root_texture = static_cast<gl::viewable_image*>(view->image());
+					auto stencil_view = root_texture->get_view(0xAAE4, rsx::default_remap_vector, gl::image_aspect::stencil);
 
-					if (double_assign)
-					{
-						auto root_texture = static_cast<gl::viewable_image*>(view->image());
-						auto stencil_view = root_texture->get_view(0xAAE4, rsx::default_remap_vector, gl::image_aspect::stencil);
-
-						_SelectTexture(GL_STENCIL_MIRRORS_START + i);
-						stencil_view->bind();
-					}
-				}
-				else
-				{
-					auto target = gl::get_target(sampler_state->image_type);
-					glBindTexture(target, m_null_textures[target]->id());
-
-					if (double_assign)
-					{
-						_SelectTexture(GL_STENCIL_MIRRORS_START + i);
-						glBindTexture(target, m_null_textures[target]->id());
-					}
+					_SelectTexture(GL_STENCIL_MIRRORS_START + i);
+					stencil_view->bind();
 				}
 			}
 			else
 			{
-				glBindTexture(GL_TEXTURE_1D, m_null_textures[GL_TEXTURE_1D]->id());
-				glBindTexture(GL_TEXTURE_2D, m_null_textures[GL_TEXTURE_2D]->id());
-				glBindTexture(GL_TEXTURE_3D, m_null_textures[GL_TEXTURE_3D]->id());
-				glBindTexture(GL_TEXTURE_CUBE_MAP, m_null_textures[GL_TEXTURE_CUBE_MAP]->id());
+				auto target = gl::get_target(current_fragment_program.get_texture_dimension(i));
+				glBindTexture(target, m_null_textures[target]->id());
 
-				if (double_assign)
+				if (current_fragment_program.redirected_textures & (1 << i))
 				{
 					_SelectTexture(GL_STENCIL_MIRRORS_START + i);
-
-					glBindTexture(GL_TEXTURE_1D, m_null_textures[GL_TEXTURE_1D]->id());
-					glBindTexture(GL_TEXTURE_2D, m_null_textures[GL_TEXTURE_2D]->id());
-					glBindTexture(GL_TEXTURE_3D, m_null_textures[GL_TEXTURE_3D]->id());
-					glBindTexture(GL_TEXTURE_CUBE_MAP, m_null_textures[GL_TEXTURE_CUBE_MAP]->id());
+					glBindTexture(target, m_null_textures[target]->id());
 				}
 			}
 		}
