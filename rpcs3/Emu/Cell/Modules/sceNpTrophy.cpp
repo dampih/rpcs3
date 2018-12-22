@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "Emu/System.h"
 #include "Emu/IdManager.h"
 #include "Emu/Cell/PPUModule.h"
@@ -12,7 +12,11 @@
 #include "sceNp.h"
 #include "sceNpTrophy.h"
 
+#include "cellSysutil.h"
+
 #include "Utilities/StrUtil.h"
+
+#include <thread>
 
 LOG_CHANNEL(sceNpTrophy);
 
@@ -316,19 +320,42 @@ error_code sceNpTrophyRegisterContext(ppu_thread& ppu, u32 context, u32 handle, 
 	// * Installed
 	// We will go with the easy path of Installed, and that's it.
 
-	auto statuses = {SCE_NP_TROPHY_STATUS_INSTALLED,
-					 SCE_NP_TROPHY_STATUS_PROCESSING_SETUP,
-					 SCE_NP_TROPHY_STATUS_PROCESSING_PROGRESS,
-					 SCE_NP_TROPHY_STATUS_PROCESSING_FINALIZE,
-					 SCE_NP_TROPHY_STATUS_PROCESSING_COMPLETE};
-
-	for (auto status : statuses)
+	// The callback is called once and then if it returns >= 0 the cb is called through events(coming from vsh) that are passed to the CB through cellSysutilCheckCallback
+	if (statusCb(ppu, context, SCE_NP_TROPHY_STATUS_INSTALLED, 100, 100, arg) < 0)
 	{
-		if (statusCb(ppu, context, status, 100, 100, arg) < 0)
-		{
-			return SCE_NP_TROPHY_ERROR_PROCESSING_ABORTED;
-		}
+		return SCE_NP_TROPHY_ERROR_PROCESSING_ABORTED;
 	}
+
+	// This emulates vsh sending the events and ensures that not 2 events are processed at once
+	std::thread vsh_sim([=]()
+	{
+		const auto cbm = fxm::get_always<sysutil_cb_manager>();
+		auto statuses =
+		{
+			SCE_NP_TROPHY_STATUS_PROCESSING_SETUP,
+			SCE_NP_TROPHY_STATUS_PROCESSING_PROGRESS,
+			SCE_NP_TROPHY_STATUS_PROCESSING_FINALIZE,
+			SCE_NP_TROPHY_STATUS_PROCESSING_COMPLETE
+		};
+
+		for (auto status : statuses)
+		{
+			atomic_t<bool> done = false;
+			// Lock to ensure we don't push cb while cellSysutilCheckCallback is running
+			{
+				std::lock_guard lock(cbm->sync_mutex);
+				sysutil_register_cb([&](ppu_thread& cb_ppu) -> s32
+				{
+					statusCb(cb_ppu, context, status, 100, 100, arg);
+					done = true;
+					return 0;
+				});
+			}
+			while (done != true) busy_wait();
+		}
+	});
+
+	vsh_sim.detach();
 
 	return CELL_OK;
 }
