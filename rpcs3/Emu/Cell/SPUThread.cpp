@@ -1307,7 +1307,7 @@ bool spu_thread::process_mfc_cmd(spu_mfc_cmd args)
 
 		bool result = false;
 
-		if (raddr == addr && rtime == vm::reservation_acquire(raddr, 128))
+		if (raddr == addr && rtime == (vm::reservation_acquire(raddr, 128).load() & ~1ull))
 		{
 			const auto& to_write = _ref<decltype(rdata)>(args.lsa & 0x3ff80);
 
