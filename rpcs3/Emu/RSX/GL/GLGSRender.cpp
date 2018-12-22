@@ -426,10 +426,10 @@ void GLGSRender::end()
 
 				if (current_fragment_program.redirected_textures & (1 << i))
 				{
+					_SelectTexture(GL_STENCIL_MIRRORS_START + i);
+
 					auto root_texture = static_cast<gl::viewable_image*>(view->image());
 					auto stencil_view = root_texture->get_view(0xAAE4, rsx::default_remap_vector, gl::image_aspect::stencil);
-
-					_SelectTexture(GL_STENCIL_MIRRORS_START + i);
 					stencil_view->bind();
 				}
 			}
