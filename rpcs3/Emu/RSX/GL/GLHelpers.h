@@ -1616,7 +1616,7 @@ namespace gl
 			m_component_layout = { GL_ALPHA, GL_RED, GL_GREEN, GL_BLUE };
 		}
 
-		~texture()
+		virtual ~texture()
 		{
 			glDeleteTextures(1, &m_id);
 		}
@@ -1853,6 +1853,7 @@ namespace gl
 				constexpr u32 depth_stencil_mask = (image_aspect::depth | image_aspect::stencil);
 				verify("Invalid aspect mask combination" HERE), (aspect_flags & depth_stencil_mask) != depth_stencil_mask;
 
+				glBindTexture(m_target, m_id);
 				glTexParameteri(m_target, GL_DEPTH_STENCIL_TEXTURE_MODE, GL_STENCIL_INDEX);
 			}
 		}

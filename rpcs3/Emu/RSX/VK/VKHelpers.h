@@ -692,7 +692,7 @@ namespace vk
 
 		// TODO: Ctor that uses a provided memory heap
 
-		~image()
+		virtual ~image()
 		{
 			vkDestroyImage(m_device, value, nullptr);
 		}

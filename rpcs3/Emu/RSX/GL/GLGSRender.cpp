@@ -426,10 +426,10 @@ void GLGSRender::end()
 
 				if (current_fragment_program.redirected_textures & (1 << i))
 				{
+					_SelectTexture(GL_STENCIL_MIRRORS_START + i);
+
 					auto root_texture = static_cast<gl::viewable_image*>(view->image());
 					auto stencil_view = root_texture->get_view(0xAAE4, rsx::default_remap_vector, gl::image_aspect::stencil);
-
-					_SelectTexture(GL_STENCIL_MIRRORS_START + i);
 					stencil_view->bind();
 				}
 			}
@@ -452,7 +452,7 @@ void GLGSRender::end()
 		if (current_vp_metadata.referenced_textures_mask & (1 << i))
 		{
 			auto sampler_state = static_cast<gl::texture_cache::sampled_image_descriptor*>(vs_sampler_state[i].get());
-			glActiveTexture(GL_VERTEX_TEXTURES_START + i);
+			_SelectTexture(GL_VERTEX_TEXTURES_START + i);
 
 			if (sampler_state->image_handle)
 			{
