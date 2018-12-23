@@ -977,7 +977,8 @@ static T ppu_load_acquire_reservation(ppu_thread& ppu, u32 addr)
 		}
 	}
 
-	vm::temporary_unlock(ppu);
+	// Fast unlock vm's memory lock
+	ppu.state += cpu_flag::stop;
 
 	for (u64 i = 0;; i++)
 	{
@@ -1003,8 +1004,7 @@ static T ppu_load_acquire_reservation(ppu_thread& ppu, u32 addr)
 		}
 	}
 
-	ppu.cpu_mem();
-
+	ppu.state -= cpu_flag::stop;
 	return static_cast<T>(ppu.rdata << data_off >> size_off);
 }
 
@@ -1090,7 +1090,8 @@ extern bool ppu_stwcx(ppu_thread& ppu, u32 addr, u32 reg_value)
 		return false;
 	}
 
-	vm::temporary_unlock(ppu);
+	// Fast unlock vm's memory lock
+	ppu.state += cpu_flag::stop;
 
 	auto& res = vm::reservation_lock(addr, sizeof(u32));
 
@@ -1106,7 +1107,7 @@ extern bool ppu_stwcx(ppu_thread& ppu, u32 addr, u32 reg_value)
 		res &= ~1ull;
 	}
 
-	ppu.cpu_mem();
+	ppu.state -= cpu_flag::stop;
 	ppu.raddr = 0;
 	return result;
 }
@@ -1183,7 +1184,8 @@ extern bool ppu_stdcx(ppu_thread& ppu, u32 addr, u64 reg_value)
 		return false;
 	}
 
-	vm::temporary_unlock(ppu);
+	// Fast unlock vm's memory lock
+	ppu.state += cpu_flag::stop;
 
 	auto& res = vm::reservation_lock(addr, sizeof(u64));
 
@@ -1199,7 +1201,7 @@ extern bool ppu_stdcx(ppu_thread& ppu, u32 addr, u64 reg_value)
 		res &= ~1ull;
 	}
 
-	ppu.cpu_mem();
+	ppu.state -= cpu_flag::stop;
 	ppu.raddr = 0;
 	return result;
 }
