@@ -1311,7 +1311,6 @@ bool spu_thread::process_mfc_cmd(spu_mfc_cmd args)
 			{
 				if (spu_putllc_tx(raddr, rtime, rdata.data(), to_write.data()))
 				{
-					vm::reservation_notifier(raddr, 128).notify_all();
 					result = true;
 				}
 
@@ -1331,7 +1330,6 @@ bool spu_thread::process_mfc_cmd(spu_mfc_cmd args)
 				{
 					data = to_write;
 					vm::reservation_update(raddr, 128);
-					vm::reservation_notifier(raddr, 128).notify_all();
 					result = true;
 				}
 				else
@@ -1343,6 +1341,7 @@ bool spu_thread::process_mfc_cmd(spu_mfc_cmd args)
 
 		if (result)
 		{
+			vm::reservation_notifier(addr, 128).notify_all();
 			ch_atomic_stat.set_value(MFC_PUTLLC_SUCCESS);
 		}
 		else
