@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "Emu/System.h"
 #include "Emu/IdManager.h"
 #include "Emu/Cell/PPUModule.h"
@@ -11,31 +11,6 @@
 #include <queue>
 
 LOG_CHANNEL(cellSysutil);
-
-struct sysutil_cb_manager
-{
-	std::mutex mutex;
-
-	std::array<std::pair<vm::ptr<CellSysutilCallback>, vm::ptr<void>>, 4> callbacks;
-
-	std::queue<std::function<s32(ppu_thread&)>> registered;
-
-	std::function<s32(ppu_thread&)> get_cb()
-	{
-		std::lock_guard lock(mutex);
-
-		if (registered.empty())
-		{
-			return nullptr;
-		}
-
-		auto func = std::move(registered.front());
-
-		registered.pop();
-
-		return func;
-	}
-};
 
 extern void sysutil_register_cb(std::function<s32(ppu_thread&)>&& cb)
 {
@@ -232,11 +207,19 @@ s32 cellSysutilGetSystemParamString(CellSysutilParamId id, vm::ptr<char> buf, u3
 	return CELL_OK;
 }
 
+// Note: the way we do things here is inaccurate(but maybe sufficient)
+// The real function goes over a table of 0x20 entries[ event_code:u32 callback_addr:u32 ]
+// Those callbacks are registered through cellSysutilRegisterCallbackDispatcher(u32 event_code, vm::ptr<void> func_addr)
+// The function goes through all the callback looking for one callback associated with event 0x100, if any is found it is called with parameters r3=0x101 r4=0
+// This particular CB seems to be associated with sysutil itself
+// Then it checks for events on an event_queue associated with sysutil, checks if any cb is associated with that event and calls them with parameters that come from the event
 error_code cellSysutilCheckCallback(ppu_thread& ppu)
 {
 	cellSysutil.trace("cellSysutilCheckCallback()");
 
 	const auto cbm = fxm::get_always<sysutil_cb_manager>();
+
+	std::lock_guard lock(cbm->sync_mutex);
 
 	while (auto func = cbm->get_cb())
 	{
