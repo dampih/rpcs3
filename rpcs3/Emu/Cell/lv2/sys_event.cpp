@@ -226,6 +226,8 @@ error_code sys_event_queue_tryreceive(u32 equeue_id, vm::ptr<sys_event_t> event_
 
 error_code sys_event_queue_receive(ppu_thread& ppu, u32 equeue_id, vm::ptr<sys_event_t> dummy_event, u64 timeout)
 {
+	vm::temp_unlocker unl(ppu);
+
 	sys_event.trace("sys_event_queue_receive(equeue_id=0x%x, *0x%x, timeout=0x%llx)", equeue_id, dummy_event, timeout);
 
 	ppu.gpr[3] = CELL_OK;

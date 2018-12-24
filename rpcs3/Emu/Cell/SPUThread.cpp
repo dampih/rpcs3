@@ -618,7 +618,7 @@ void spu_thread::cpu_mem()
 
 void spu_thread::cpu_unmem()
 {
-	//state.test_and_set(cpu_flag::memory);
+	//vm::passive_unlock(*this);
 }
 
 spu_thread::~spu_thread()

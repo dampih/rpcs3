@@ -13,7 +13,7 @@ LOG_CHANNEL(sys_ppu_thread);
 
 void _sys_ppu_thread_exit(ppu_thread& ppu, u64 errorcode)
 {
-	vm::temporary_unlock(ppu);
+	vm::cleanup_unlock(ppu);
 
 	sys_ppu_thread.trace("_sys_ppu_thread_exit(errorcode=0x%llx)", errorcode);
 
@@ -65,7 +65,7 @@ void sys_ppu_thread_yield(ppu_thread& ppu)
 
 error_code sys_ppu_thread_join(ppu_thread& ppu, u32 thread_id, vm::ptr<u64> vptr)
 {
-	vm::temporary_unlock(ppu);
+	vm::temp_unlocker unl(ppu);
 
 	sys_ppu_thread.trace("sys_ppu_thread_join(thread_id=0x%x, vptr=*0x%x)", thread_id, vptr);
 
@@ -335,6 +335,8 @@ error_code _sys_ppu_thread_create(vm::ptr<u64> thread_id, vm::ptr<ppu_thread_par
 
 error_code sys_ppu_thread_start(ppu_thread& ppu, u32 thread_id)
 {
+	vm::temp_unlocker unl(ppu);
+
 	sys_ppu_thread.trace("sys_ppu_thread_start(thread_id=0x%x)", thread_id);
 
 	const auto thread = idm::get<named_thread<ppu_thread>>(thread_id, [&](ppu_thread& thread)

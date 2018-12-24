@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <map>
 #include <functional>
@@ -61,9 +61,15 @@ namespace vm
 	// Unregister reader (foreign thread)
 	void cleanup_unlock(cpu_thread& cpu) noexcept;
 
-	// Optimization (set cpu_flag::memory)
-	void temporary_unlock(cpu_thread& cpu) noexcept;
-	void temporary_unlock() noexcept;
+	// Unregister reader while asleep
+	struct temp_unlocker final
+	{
+		temp_unlocker(const temp_unlocker&) = delete;
+		temp_unlocker& operator=(const temp_unlocker&) = delete;
+		temp_unlocker(cpu_thread& cpu);
+		temp_unlocker();
+		~temp_unlocker();
+	};
 
 	class reader_lock final
 	{

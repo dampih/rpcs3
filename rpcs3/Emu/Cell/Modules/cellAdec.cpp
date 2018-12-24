@@ -202,6 +202,7 @@ public:
 				// TODO: finalize
 				cellAdec.warning("adecEndSeq:");
 				cbFunc(*this, id, CELL_ADEC_MSG_TYPE_SEQDONE, CELL_OK, cbArg);
+				vm::passive_unlock(*this);
 				lv2_obj::sleep(*this);
 
 				just_finished = true;
@@ -379,12 +380,14 @@ public:
 						{
 							frame.data = nullptr; // to prevent destruction
 							cbFunc(*this, id, CELL_ADEC_MSG_TYPE_PCMOUT, CELL_OK, cbArg);
+							vm::passive_unlock(*this);
 							lv2_obj::sleep(*this);
 						}
 					}
 				}
 
 				cbFunc(*this, id, CELL_ADEC_MSG_TYPE_AUDONE, task.au.auInfo_addr, cbArg);
+				vm::passive_unlock(*this);
 				lv2_obj::sleep(*this);
 				break;
 			}
@@ -586,8 +589,10 @@ s32 cellAdecOpenExt(vm::ptr<CellAdecType> type, vm::ptr<CellAdecResourceEx> res,
 	return cellAdecOpenEx(type, res, cb, handle);
 }
 
-s32 cellAdecClose(u32 handle)
+s32 cellAdecClose(ppu_thread& ppu, u32 handle)
 {
+	vm::temp_unlocker unl(ppu);
+
 	cellAdec.warning("cellAdecClose(handle=0x%x)", handle);
 
 	const auto adec = idm::get<AudioDecoder>(handle);

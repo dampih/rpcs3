@@ -243,6 +243,7 @@ public:
 					dmuxMsg->msgType = CELL_DMUX_MSG_TYPE_DEMUX_DONE;
 					dmuxMsg->supplementalInfo = stream.userdata;
 					cbFunc(*this, id, dmuxMsg, cbArg);
+					vm::passive_unlock(*this);
 					lv2_obj::sleep(*this);
 
 					is_working = false;
@@ -397,6 +398,7 @@ public:
 							esMsg->msgType = CELL_DMUX_ES_MSG_TYPE_AU_FOUND;
 							esMsg->supplementalInfo = stream.userdata;
 							es.cbFunc(*this, id, es.id, esMsg, es.cbArg);
+							vm::passive_unlock(*this);
 							lv2_obj::sleep(*this);
 						}
 					}
@@ -463,6 +465,7 @@ public:
 							esMsg->msgType = CELL_DMUX_ES_MSG_TYPE_AU_FOUND;
 							esMsg->supplementalInfo = stream.userdata;
 							es.cbFunc(*this, id, es.id, esMsg, es.cbArg);
+							vm::passive_unlock(*this);
 							lv2_obj::sleep(*this);
 						}
 
@@ -540,6 +543,7 @@ public:
 					dmuxMsg->msgType = CELL_DMUX_MSG_TYPE_DEMUX_DONE;
 					dmuxMsg->supplementalInfo = stream.userdata;
 					cbFunc(*this, id, dmuxMsg, cbArg);
+					vm::passive_unlock(*this);
 					lv2_obj::sleep(*this);
 
 					stream = {};
@@ -629,6 +633,7 @@ public:
 					esMsg->msgType = CELL_DMUX_ES_MSG_TYPE_AU_FOUND;
 					esMsg->supplementalInfo = stream.userdata;
 					es.cbFunc(*this, id, es.id, esMsg, es.cbArg);
+					vm::passive_unlock(*this);
 					lv2_obj::sleep(*this);
 				}
 
@@ -642,6 +647,7 @@ public:
 				esMsg->msgType = CELL_DMUX_ES_MSG_TYPE_FLUSH_DONE;
 				esMsg->supplementalInfo = stream.userdata;
 				es.cbFunc(*this, id, es.id, esMsg, es.cbArg);
+				vm::passive_unlock(*this);
 				lv2_obj::sleep(*this);
 				break;
 			}

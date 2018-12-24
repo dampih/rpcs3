@@ -115,14 +115,11 @@ bool cpu_thread::check_state()
 #endif
 
 	bool cpu_sleep_called = false;
-	bool cpu_flag_memory = false;
 
 	while (true)
 	{
 		if (state & cpu_flag::memory && state.test_and_reset(cpu_flag::memory))
 		{
-			cpu_flag_memory = true;
-
 			if (auto& ptr = vm::g_tls_locked)
 			{
 				ptr->compare_and_swap(this, nullptr);
@@ -142,7 +139,7 @@ bool cpu_thread::check_state()
 
 		if (!is_paused())
 		{
-			if (cpu_flag_memory)
+			if (!g_use_rtm)
 			{
 				cpu_mem();
 			}

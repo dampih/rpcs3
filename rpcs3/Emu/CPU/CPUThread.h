@@ -93,10 +93,10 @@ public:
 	// Callback for cpu_flag::suspend
 	virtual void cpu_sleep() {}
 
-	// Callback for cpu_flag::memory
+	// Callback for vm::passive_lock
 	virtual void cpu_mem() {}
 
-	// Callback for vm::temporary_unlock
+	// Callback for vm::passive_unlock
 	virtual void cpu_unmem() {}
 };
 

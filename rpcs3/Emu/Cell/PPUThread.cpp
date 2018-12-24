@@ -552,7 +552,7 @@ void ppu_thread::cpu_task()
 		}
 		case ppu_cmd::sleep:
 		{
-			cmd_pop(), lv2_obj::sleep(*this);
+			cmd_pop(), cpu_unmem(), lv2_obj::sleep(*this);
 			break;
 		}
 		case ppu_cmd::reset_stack:
@@ -570,7 +570,7 @@ void ppu_thread::cpu_task()
 
 void ppu_thread::cpu_sleep()
 {
-	vm::temporary_unlock(*this);
+	cpu_unmem();
 	lv2_obj::awake(*this);
 }
 
@@ -581,7 +581,7 @@ void ppu_thread::cpu_mem()
 
 void ppu_thread::cpu_unmem()
 {
-	state.test_and_set(cpu_flag::memory);
+	vm::passive_unlock(*this);
 }
 
 void ppu_thread::exec_task()
@@ -712,11 +712,6 @@ ppu_thread::ppu_thread(const ppu_thread_params& param, std::string_view name, u3
 
 	// Trigger the scheduler
 	state += cpu_flag::suspend;
-
-	if (!g_use_rtm)
-	{
-		state += cpu_flag::memory;
-	}
 }
 
 void ppu_thread::cmd_push(cmd64 cmd)
@@ -832,6 +827,12 @@ void ppu_thread::fast_call(u32 addr, u32 rtoc)
 			g_tls_log_prefix = old_fmt;
 		}
 	});
+
+	if (!g_use_rtm && !old_cia)
+	{
+		// Acquire memory mutex at the start of execution
+		cpu_mem();
+	}
 
 	try
 	{

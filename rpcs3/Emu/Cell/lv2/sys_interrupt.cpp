@@ -150,7 +150,7 @@ error_code _sys_interrupt_thread_disestablish(ppu_thread& ppu, u32 ih, vm::ptr<u
 
 void sys_interrupt_thread_eoi(ppu_thread& ppu)
 {
-	vm::temporary_unlock(ppu);
+	vm::cleanup_unlock(ppu);
 
 	sys_interrupt.trace("sys_interrupt_thread_eoi()");
 

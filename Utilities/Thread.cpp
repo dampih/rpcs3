@@ -1097,6 +1097,7 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context)
 
 		try
 		{
+			vm::temp_unlocker unl;
 			handled = rsx::g_access_violation_handler(addr, is_writing);
 		}
 		catch (const std::exception& e)
@@ -1105,7 +1106,7 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context)
 
 			if (cpu)
 			{
-				vm::temporary_unlock(*cpu);
+				vm::cleanup_unlock(*cpu);
 				cpu->state += cpu_flag::dbg_pause;
 
 				if (cpu->test_stopped())
@@ -1274,6 +1275,8 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context)
 	{
 		if (fxm::check<page_fault_notification_entries>())
 		{
+			vm::temp_unlocker unl(*cpu);
+
 			for (const auto& entry : fxm::get<page_fault_notification_entries>()->entries)
 			{
 				auto mem = vm::get(vm::any, entry.start_addr);
@@ -1324,7 +1327,7 @@ bool handle_access_violation(u32 addr, bool is_writing, x64_context* context)
 			}
 		}
 
-		vm::temporary_unlock(*cpu);
+		vm::cleanup_unlock(*cpu);
 		LOG_FATAL(MEMORY, "Access violation %s location 0x%x", is_writing ? "writing" : "reading", addr);
 		cpu->state += cpu_flag::dbg_pause;
 		cpu->check_state();

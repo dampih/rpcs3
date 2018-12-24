@@ -118,11 +118,6 @@ namespace vm
 		{
 			*ptr = nullptr;
 			ptr = nullptr;
-
-			if (cpu.state & cpu_flag::memory)
-			{
-				cpu.state -= cpu_flag::memory;
-			}
 		}
 	}
 
@@ -138,19 +133,24 @@ namespace vm
 		}
 	}
 
-	void temporary_unlock(cpu_thread& cpu) noexcept
+	temp_unlocker::temp_unlocker(cpu_thread& cpu)
 	{
-		if (g_tls_locked && g_tls_locked->compare_and_swap_test(&cpu, nullptr))
-		{
-			cpu.cpu_unmem();
-		}
+		cpu.cpu_unmem();
 	}
 
-	void temporary_unlock() noexcept
+	temp_unlocker::temp_unlocker()
 	{
 		if (auto cpu = get_current_cpu_thread())
 		{
-			temporary_unlock(*cpu);
+			cpu->cpu_unmem();
+		}
+	}
+
+	temp_unlocker::~temp_unlocker()
+	{
+		if (auto cpu = get_current_cpu_thread(); cpu && !g_use_rtm)
+		{
+			cpu->cpu_mem();
 		}
 	}
 
@@ -168,7 +168,6 @@ namespace vm
 		if (cpu)
 		{
 			_register_lock(cpu);
-			cpu->state -= cpu_flag::memory;
 		}
 	}
 
@@ -254,7 +253,6 @@ namespace vm
 		if (cpu)
 		{
 			_register_lock(cpu);
-			cpu->state -= cpu_flag::memory;
 		}
 	}
 
