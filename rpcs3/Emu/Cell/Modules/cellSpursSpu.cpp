@@ -757,6 +757,8 @@ bool spursSysServiceEntry(spu_thread& spu)
 // Wait for an external event or exit the SPURS thread group if no workloads can be scheduled
 void spursSysServiceIdleHandler(spu_thread& spu, SpursKernelContext* ctxt)
 {
+	vm::temp_unlocker unl;
+
 	bool shouldExit;
 
 	while (true)

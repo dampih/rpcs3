@@ -6,6 +6,7 @@
 #include "Utilities/VirtualMemory.h"
 #include "Utilities/asm.h"
 #include "Emu/CPU/CPUThread.h"
+#include "Emu/Cell/SPUThread.h"
 #include "Emu/Cell/lv2/sys_memory.h"
 #include "Emu/RSX/GSRender.h"
 #include <atomic>
@@ -117,11 +118,6 @@ namespace vm
 		{
 			*ptr = nullptr;
 			ptr = nullptr;
-
-			if (cpu.state & cpu_flag::memory)
-			{
-				cpu.state -= cpu_flag::memory;
-			}
 		}
 	}
 
@@ -137,19 +133,24 @@ namespace vm
 		}
 	}
 
-	void temporary_unlock(cpu_thread& cpu) noexcept
+	temp_unlocker::temp_unlocker(cpu_thread& cpu)
 	{
-		if (g_tls_locked && g_tls_locked->compare_and_swap_test(&cpu, nullptr))
-		{
-			cpu.cpu_unmem();
-		}
+		cpu.cpu_unmem();
 	}
 
-	void temporary_unlock() noexcept
+	temp_unlocker::temp_unlocker()
 	{
 		if (auto cpu = get_current_cpu_thread())
 		{
-			temporary_unlock(*cpu);
+			cpu->cpu_unmem();
+		}
+	}
+
+	temp_unlocker::~temp_unlocker()
+	{
+		if (auto cpu = get_current_cpu_thread(); cpu && !g_use_rtm)
+		{
+			cpu->cpu_mem();
 		}
 	}
 
@@ -167,7 +168,6 @@ namespace vm
 		if (cpu)
 		{
 			_register_lock(cpu);
-			cpu->state -= cpu_flag::memory;
 		}
 	}
 
@@ -194,7 +194,7 @@ namespace vm
 		m_upgraded = true;
 	}
 
-	writer_lock::writer_lock(int full)
+	writer_lock::writer_lock(u32 addr)
 		: locked(true)
 	{
 		auto cpu = get_current_cpu_thread();
@@ -206,13 +206,16 @@ namespace vm
 
 		g_mutex.lock();
 
-		if (full)
+		if (addr)
 		{
 			for (auto& lock : g_locks)
 			{
 				if (cpu_thread* ptr = lock)
 				{
-					ptr->state.test_and_set(cpu_flag::memory);
+					if (LIKELY(ptr->id_type() == 1))
+					{
+						ptr->state.test_and_set(cpu_flag::memory);
+					}
 				}
 			}
 
@@ -225,6 +228,23 @@ namespace vm
 						break;
 					}
 
+					if (UNLIKELY(ptr->id_type() == 2))
+					{
+						const u32 target = static_cast<spu_thread*>(ptr)->ch_mfc_cmd.eal & -128u;
+
+						if (target > addr)
+						{
+							break;
+						}
+
+						const u32 size = align(static_cast<spu_thread*>(ptr)->ch_mfc_cmd.size, 128);
+
+						if (target + size <= addr)
+						{
+							break;
+						}
+					}
+
 					busy_wait();
 				}
 			}
@@ -233,7 +253,6 @@ namespace vm
 		if (cpu)
 		{
 			_register_lock(cpu);
-			cpu->state -= cpu_flag::memory;
 		}
 	}
 

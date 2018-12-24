@@ -369,7 +369,7 @@ error_code sys_spu_thread_group_destroy(u32 id)
 
 error_code sys_spu_thread_group_start(ppu_thread& ppu, u32 id)
 {
-	vm::temporary_unlock(ppu);
+	vm::temp_unlocker unl(ppu);
 
 	sys_spu.trace("sys_spu_thread_group_start(id=0x%x)", id);
 
@@ -635,7 +635,7 @@ error_code sys_spu_thread_group_terminate(u32 id, s32 value)
 
 error_code sys_spu_thread_group_join(ppu_thread& ppu, u32 id, vm::ptr<u32> cause, vm::ptr<u32> status)
 {
-	vm::temporary_unlock(ppu);
+	vm::temp_unlocker unl(ppu);
 
 	sys_spu.trace("sys_spu_thread_group_join(id=0x%x, cause=*0x%x, status=*0x%x)", id, cause, status);
 

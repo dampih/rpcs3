@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <map>
 #include <functional>
@@ -61,9 +61,15 @@ namespace vm
 	// Unregister reader (foreign thread)
 	void cleanup_unlock(cpu_thread& cpu) noexcept;
 
-	// Optimization (set cpu_flag::memory)
-	void temporary_unlock(cpu_thread& cpu) noexcept;
-	void temporary_unlock() noexcept;
+	// Unregister reader while asleep
+	struct temp_unlocker final
+	{
+		temp_unlocker(const temp_unlocker&) = delete;
+		temp_unlocker& operator=(const temp_unlocker&) = delete;
+		temp_unlocker(cpu_thread& cpu);
+		temp_unlocker();
+		~temp_unlocker();
+	};
 
 	class reader_lock final
 	{
@@ -84,7 +90,7 @@ namespace vm
 
 		writer_lock(const writer_lock&) = delete;
 		writer_lock& operator=(const writer_lock&) = delete;
-		writer_lock(int full);
+		writer_lock(u32 addr = 0);
 		~writer_lock();
 
 		explicit operator bool() const { return locked; }
@@ -101,7 +107,7 @@ namespace vm
 	inline void reservation_update(u32 addr, u32 size, bool lsb = false)
 	{
 		// Update reservation info with new timestamp
-		reservation_acquire(addr, size) = (__rdtsc() << 1) | u64{lsb};
+		reservation_acquire(addr, size) += 2;
 	}
 
 	// Get reservation sync variable

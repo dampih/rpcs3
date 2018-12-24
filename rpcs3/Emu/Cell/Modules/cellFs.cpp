@@ -903,6 +903,7 @@ struct fs_aio_thread : ppu_thread
 			}
 
 			func(*this, aio, error, xid, result);
+			vm::passive_unlock(*this);
 			lv2_obj::sleep(*this);
 		}
 	}

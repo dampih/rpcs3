@@ -118,13 +118,11 @@ struct lv2_obj
 
 	static void sleep(cpu_thread& thread, u64 timeout = 0)
 	{
-		vm::temporary_unlock(thread);
 		sleep_timeout(thread, timeout);
 	}
 
 	static void yield(cpu_thread& thread)
 	{
-		vm::temporary_unlock(thread);
 		awake(thread, -4);
 	}
 

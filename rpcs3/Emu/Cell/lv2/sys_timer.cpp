@@ -278,8 +278,6 @@ error_code sys_timer_disconnect_event_queue(u32 timer_id)
 
 error_code sys_timer_sleep(ppu_thread& ppu, u32 sleep_time)
 {
-	vm::temporary_unlock(ppu);
-
 	sys_timer.trace("sys_timer_sleep(sleep_time=%d) -> sys_timer_usleep()", sleep_time);
 
 	return sys_timer_usleep(ppu, sleep_time * u64{1000000});
@@ -287,7 +285,7 @@ error_code sys_timer_sleep(ppu_thread& ppu, u32 sleep_time)
 
 error_code sys_timer_usleep(ppu_thread& ppu, u64 sleep_time)
 {
-	vm::temporary_unlock(ppu);
+	vm::temp_unlocker unl(ppu);
 
 	sys_timer.trace("sys_timer_usleep(sleep_time=0x%llx)", sleep_time);
 

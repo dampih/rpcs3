@@ -356,6 +356,7 @@ struct vdec_context final
 						std::lock_guard{mutex}, out.push(std::move(frame));
 
 						cb_func(ppu, vid, CELL_VDEC_MSG_TYPE_PICOUT, CELL_OK, cb_arg);
+						vm::passive_unlock(ppu);
 						lv2_obj::sleep(ppu);
 					}
 
@@ -368,6 +369,7 @@ struct vdec_context final
 				if (out_max)
 				{
 					cb_func(ppu, vid, cmd->mode != -1 ? CELL_VDEC_MSG_TYPE_AUDONE : CELL_VDEC_MSG_TYPE_SEQDONE, CELL_OK, cb_arg);
+					vm::passive_unlock(ppu);
 					lv2_obj::sleep(ppu);
 				}
 

@@ -552,7 +552,7 @@ void ppu_thread::cpu_task()
 		}
 		case ppu_cmd::sleep:
 		{
-			cmd_pop(), lv2_obj::sleep(*this);
+			cmd_pop(), cpu_unmem(), lv2_obj::sleep(*this);
 			break;
 		}
 		case ppu_cmd::reset_stack:
@@ -570,7 +570,7 @@ void ppu_thread::cpu_task()
 
 void ppu_thread::cpu_sleep()
 {
-	vm::temporary_unlock(*this);
+	cpu_unmem();
 	lv2_obj::awake(*this);
 }
 
@@ -581,7 +581,7 @@ void ppu_thread::cpu_mem()
 
 void ppu_thread::cpu_unmem()
 {
-	state.test_and_set(cpu_flag::memory);
+	vm::passive_unlock(*this);
 }
 
 void ppu_thread::exec_task()
@@ -712,11 +712,6 @@ ppu_thread::ppu_thread(const ppu_thread_params& param, std::string_view name, u3
 
 	// Trigger the scheduler
 	state += cpu_flag::suspend;
-
-	if (!g_use_rtm)
-	{
-		state += cpu_flag::memory;
-	}
 }
 
 void ppu_thread::cmd_push(cmd64 cmd)
@@ -832,6 +827,12 @@ void ppu_thread::fast_call(u32 addr, u32 rtoc)
 			g_tls_log_prefix = old_fmt;
 		}
 	});
+
+	if (!g_use_rtm && !old_cia)
+	{
+		// Acquire memory mutex at the start of execution
+		cpu_mem();
+	}
 
 	try
 	{
@@ -977,7 +978,8 @@ static T ppu_load_acquire_reservation(ppu_thread& ppu, u32 addr)
 		}
 	}
 
-	vm::temporary_unlock(ppu);
+	// Fast unlock vm's memory lock
+	ppu.state += cpu_flag::stop;
 
 	for (u64 i = 0;; i++)
 	{
@@ -1003,8 +1005,7 @@ static T ppu_load_acquire_reservation(ppu_thread& ppu, u32 addr)
 		}
 	}
 
-	ppu.cpu_mem();
-
+	ppu.state -= cpu_flag::stop;
 	return static_cast<T>(ppu.rdata << data_off >> size_off);
 }
 
@@ -1044,7 +1045,7 @@ const auto ppu_stwcx_tx = build_function_asm<bool(*)(u32 raddr, u64 rtime, u64 r
 	c.cmp(x86::dword_ptr(x86::r11), args[2].r32());
 	c.jne(fail);
 	c.mov(x86::dword_ptr(x86::r11), args[3].r32());
-	c.add(x86::qword_ptr(x86::r10), 1);
+	c.add(x86::qword_ptr(x86::r10), 2);
 	c.xend();
 	c.mov(x86::eax, 1);
 	c.ret();
@@ -1070,7 +1071,7 @@ extern bool ppu_stwcx(ppu_thread& ppu, u32 addr, u32 reg_value)
 	auto& data = vm::_ref<atomic_be_t<u32>>(addr & -4);
 	const u32 old_data = static_cast<u32>(ppu.rdata << ((addr & 7) * 8) >> 32);
 
-	if (ppu.raddr != addr || addr & 3 || old_data != data.load() || ppu.rtime != vm::reservation_acquire(addr, sizeof(u32)))
+	if (ppu.raddr != addr || addr & 3 || old_data != data.load() || ppu.rtime != (vm::reservation_acquire(addr, sizeof(u32)).load() & ~1ull))
 	{
 		ppu.raddr = 0;
 		return false;
@@ -1090,7 +1091,8 @@ extern bool ppu_stwcx(ppu_thread& ppu, u32 addr, u32 reg_value)
 		return false;
 	}
 
-	vm::temporary_unlock(ppu);
+	// Fast unlock vm's memory lock
+	ppu.state += cpu_flag::stop;
 
 	auto& res = vm::reservation_lock(addr, sizeof(u32));
 
@@ -1098,7 +1100,7 @@ extern bool ppu_stwcx(ppu_thread& ppu, u32 addr, u32 reg_value)
 
 	if (result)
 	{
-		vm::reservation_update(addr, sizeof(u32));
+		res++;
 		vm::reservation_notifier(addr, sizeof(u32)).notify_all();
 	}
 	else
@@ -1106,7 +1108,7 @@ extern bool ppu_stwcx(ppu_thread& ppu, u32 addr, u32 reg_value)
 		res &= ~1ull;
 	}
 
-	ppu.cpu_mem();
+	ppu.state -= cpu_flag::stop;
 	ppu.raddr = 0;
 	return result;
 }
@@ -1137,7 +1139,7 @@ const auto ppu_stdcx_tx = build_function_asm<bool(*)(u32 raddr, u64 rtime, u64 r
 	c.cmp(x86::qword_ptr(x86::r11), args[2]);
 	c.jne(fail);
 	c.mov(x86::qword_ptr(x86::r11), args[3]);
-	c.add(x86::qword_ptr(x86::r10), 1);
+	c.add(x86::qword_ptr(x86::r10), 2);
 	c.xend();
 	c.mov(x86::eax, 1);
 	c.ret();
@@ -1163,7 +1165,7 @@ extern bool ppu_stdcx(ppu_thread& ppu, u32 addr, u64 reg_value)
 	auto& data = vm::_ref<atomic_be_t<u64>>(addr & -8);
 	const u64 old_data = ppu.rdata << ((addr & 7) * 8);
 
-	if (ppu.raddr != addr || addr & 7 || old_data != data.load() || ppu.rtime != vm::reservation_acquire(addr, sizeof(u64)))
+	if (ppu.raddr != addr || addr & 7 || old_data != data.load() || ppu.rtime != (vm::reservation_acquire(addr, sizeof(u64)).load() & ~1ull))
 	{
 		ppu.raddr = 0;
 		return false;
@@ -1183,7 +1185,8 @@ extern bool ppu_stdcx(ppu_thread& ppu, u32 addr, u64 reg_value)
 		return false;
 	}
 
-	vm::temporary_unlock(ppu);
+	// Fast unlock vm's memory lock
+	ppu.state += cpu_flag::stop;
 
 	auto& res = vm::reservation_lock(addr, sizeof(u64));
 
@@ -1191,7 +1194,7 @@ extern bool ppu_stdcx(ppu_thread& ppu, u32 addr, u64 reg_value)
 
 	if (result)
 	{
-		vm::reservation_update(addr, sizeof(u64));
+		res++;
 		vm::reservation_notifier(addr, sizeof(u64)).notify_all();
 	}
 	else
@@ -1199,7 +1202,7 @@ extern bool ppu_stdcx(ppu_thread& ppu, u32 addr, u64 reg_value)
 		res &= ~1ull;
 	}
 
-	ppu.cpu_mem();
+	ppu.state -= cpu_flag::stop;
 	ppu.raddr = 0;
 	return result;
 }
