@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Emu/Cell/Common.h"
 #include "Emu/CPU/CPUThread.h"
@@ -535,7 +535,7 @@ public:
 
 	// Reservation Data
 	u64 rtime = 0;
-	alignas(128) std::array<u128, 8> rdata{};
+	alignas(128) std::array<u128, 8> rdata;
 	u32 raddr = 0;
 
 	u32 srr0;
