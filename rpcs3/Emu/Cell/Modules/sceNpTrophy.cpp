@@ -13,6 +13,10 @@
 #include "sceNpTrophy.h"
 #include "cellSysutil.h"
 
+#include "Emu/Cell/lv2/sys_event.h"
+#include "Emu/Cell/lv2/sys_process.h"
+#include "Emu/Cell/lv2/sys_timer.h"
+
 #include "Utilities/StrUtil.h"
 
 LOG_CHANNEL(sceNpTrophy);
@@ -324,21 +328,27 @@ error_code sceNpTrophyRegisterContext(ppu_thread& ppu, u32 context, u32 handle, 
 	}
 
 	// This emulates vsh sending the events and ensures that not 2 events are processed at once
-	auto statuses =
+	const std::pair<u32, u32> statuses[] =
 	{
-		SCE_NP_TROPHY_STATUS_PROCESSING_SETUP,
-		SCE_NP_TROPHY_STATUS_PROCESSING_PROGRESS,
-		SCE_NP_TROPHY_STATUS_PROCESSING_FINALIZE,
-		SCE_NP_TROPHY_STATUS_PROCESSING_COMPLETE
+		{ SCE_NP_TROPHY_STATUS_PROCESSING_SETUP, 3 },
+		{ SCE_NP_TROPHY_STATUS_PROCESSING_PROGRESS, tropusr->GetTrophiesCount() },
+		{ SCE_NP_TROPHY_STATUS_PROCESSING_FINALIZE, 4 },
+		{ SCE_NP_TROPHY_STATUS_PROCESSING_COMPLETE, 0 }
 	};
 
 	for (auto status : statuses)
 	{
-		sysutil_register_cb([=](ppu_thread& cb_ppu) -> s32
+		// Meant to simulate the slowness of the trophies as well as the fact the ppu thread will yield calling cellSysutilPacketRead
+		sys_timer_usleep(ppu, 50000);
+		for (u32 completed = 0; completed <= status.second; completed++)
 		{
-			statusCb(cb_ppu, context, status, 100, 100, arg);
-			return 0;
-		});
+			sys_timer_usleep(ppu, 5000);
+			sysutil_register_cb([=](ppu_thread& cb_ppu) -> s32
+			{
+				statusCb(cb_ppu, context, status.first, completed, status.second, arg);
+				return 0;
+			});
+		}
 	}
 
 	return CELL_OK;
