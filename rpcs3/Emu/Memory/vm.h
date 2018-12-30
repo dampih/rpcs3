@@ -84,7 +84,7 @@ namespace vm
 
 		writer_lock(const writer_lock&) = delete;
 		writer_lock& operator=(const writer_lock&) = delete;
-		writer_lock(int full);
+		writer_lock(u32 addr = 0);
 		~writer_lock();
 
 		explicit operator bool() const { return locked; }
@@ -101,7 +101,7 @@ namespace vm
 	inline void reservation_update(u32 addr, u32 size, bool lsb = false)
 	{
 		// Update reservation info with new timestamp
-		reservation_acquire(addr, size) = (__rdtsc() << 1) | u64{lsb};
+		reservation_acquire(addr, size) += 2;
 	}
 
 	// Get reservation sync variable
