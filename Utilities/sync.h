@@ -153,8 +153,6 @@ inline int futex(volatile void* uaddr, int futex_op, uint val, const timespec* t
 template <typename T, typename Pred>
 bool balanced_wait_until(atomic_t<T>& var, u64 usec_timeout, Pred&& pred)
 {
-	static_assert(sizeof(T) == 4);
-
 	const bool is_inf = usec_timeout > u64{UINT32_MAX / 1000} * 1000000;
 
 	// Optional second argument indicates that the predicate should try to retire
@@ -260,8 +258,6 @@ bool balanced_wait_until(atomic_t<T>& var, u64 usec_timeout, Pred&& pred)
 template <typename T>
 void balanced_awaken(atomic_t<T>& var, u32 weight)
 {
-	static_assert(sizeof(T) == 4);
-
 #ifdef _WIN32
 	if (OptWaitOnAddress)
 	{

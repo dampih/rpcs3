@@ -752,6 +752,9 @@
     <ClCompile Include="Emu\RSX\RSXFIFO.cpp">
       <Filter>Emu\GPU\RSX</Filter>
     </ClCompile>
+    <ClCompile Include="Emu\Memory\vm_mutex.cpp">
+      <Filter>Emu\Memory</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Crypto\aes.h">
@@ -1458,6 +1461,9 @@
     </ClInclude>
     <ClInclude Include="Emu\RSX\Common\texture_cache_predictor.h">
       <Filter>Emu\GPU\RSX\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\Memory\vm_mutex.h">
+      <Filter>Emu\Memory</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

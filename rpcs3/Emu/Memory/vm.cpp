@@ -9,6 +9,7 @@
 #include "Emu/Cell/SPUThread.h"
 #include "Emu/Cell/lv2/sys_memory.h"
 #include "Emu/RSX/GSRender.h"
+#include "vm_mutex.h"
 #include <atomic>
 #include <thread>
 #include <deque>
@@ -53,7 +54,7 @@ namespace vm
 	std::vector<std::shared_ptr<block_t>> g_locations;
 
 	// Memory mutex core
-	shared_mutex g_mutex;
+	vm_mutex g_mutex;
 
 	// Memory mutex acknowledgement
 	thread_local atomic_t<cpu_thread*>* g_tls_locked = nullptr;
@@ -73,11 +74,11 @@ namespace vm
 		}
 	}
 
-	bool passive_lock(cpu_thread& cpu, bool wait)
+	void passive_lock(cpu_thread& cpu)
 	{
 		if (UNLIKELY(g_tls_locked && *g_tls_locked == &cpu))
 		{
-			return true;
+			return;
 		}
 
 		if (LIKELY(g_mutex.is_lockable()))
@@ -85,31 +86,42 @@ namespace vm
 			// Optimistic path (hope that mutex is not exclusively locked)
 			_register_lock(&cpu);
 
-			if (UNLIKELY(!g_mutex.is_lockable()))
+			if (LIKELY(g_mutex.is_lockable()))
 			{
-				passive_unlock(cpu);
-
-				if (!wait)
-				{
-					return false;
-				}
-
-				::reader_lock lock(g_mutex);
-				_register_lock(&cpu);
+				return;
 			}
+
+			passive_unlock(cpu);
 		}
-		else
+
+		g_mutex.lock_shared();
+		_register_lock(&cpu);
+		g_mutex.unlock_shared();
+	}
+
+	void passive_lock(cpu_thread& cpu, const u32 addr, const u32 size)
+	{
+		if (UNLIKELY(g_tls_locked && *g_tls_locked == &cpu))
 		{
-			if (!wait)
-			{
-				return false;
-			}
-
-			::reader_lock lock(g_mutex);
-			_register_lock(&cpu);
+			return;
 		}
 
-		return true;
+		if (LIKELY(g_mutex.is_lockable(addr, size)))
+		{
+			// Optimistic path (hope that mutex is not exclusively locked)
+			_register_lock(&cpu);
+
+			if (LIKELY(g_mutex.is_lockable(addr, size)))
+			{
+				return;
+			}
+
+			passive_unlock(cpu);
+		}
+
+		g_mutex.lock_shared();
+		_register_lock(&cpu);
+		g_mutex.unlock_shared();
 	}
 
 	void passive_unlock(cpu_thread& cpu)
@@ -191,12 +203,11 @@ namespace vm
 			return;
 		}
 
-		g_mutex.lock_upgrade();
+		g_mutex.lock_upgrade(0);
 		m_upgraded = true;
 	}
 
 	writer_lock::writer_lock(u32 addr)
-		: locked(true)
 	{
 		auto cpu = get_current_cpu_thread();
 
@@ -205,7 +216,7 @@ namespace vm
 			cpu = nullptr;
 		}
 
-		g_mutex.lock();
+		g_mutex.lock(addr);
 
 		if (addr)
 		{
@@ -260,10 +271,7 @@ namespace vm
 
 	writer_lock::~writer_lock()
 	{
-		if (locked)
-		{
-			g_mutex.unlock();
-		}
+		g_mutex.unlock();
 	}
 
 	void reservation_lock_internal(atomic_t<u64>& res)
