@@ -44,7 +44,7 @@ namespace rsx
 		// Interactable UI element
 		struct user_interface : overlay
 		{
-			//Move this somewhere to avoid duplication
+			// Move this somewhere to avoid duplication
 			enum selection_code
 			{
 				new_save = -1,
@@ -80,131 +80,7 @@ namespace rsx
 
 			void close();
 
-			s32 run_input_loop()
-			{
-				std::array<std::chrono::steady_clock::time_point, CELL_PAD_MAX_PORT_NUM> timestamp;
-				timestamp.fill(std::chrono::steady_clock::now());
-
-				std::array<std::array<bool, 8>, CELL_PAD_MAX_PORT_NUM> button_state;
-				for (auto& state : button_state)
-				{
-					state.fill(true);
-				}
-
-				input_timer.Start();
-
-				while (!exit)
-				{
-					if (Emu.IsStopped())
-						return selection_code::canceled;
-
-					std::lock_guard lock(pad::g_pad_mutex);
-
-					const auto handler = pad::get_current_handler();
-					if (!handler)
-					{
-						LOG_ERROR(RSX, "Pad handler expected but none initialized!");
-						return selection_code::error;
-					}
-
-					const PadInfo& rinfo = handler->GetInfo();
-
-					if (Emu.IsPaused() || !rinfo.now_connect)
-					{
-						std::this_thread::sleep_for(10ms);
-						continue;
-					}
-
-					int pad_index = -1;
-					for (const auto &pad : handler->GetPads())
-					{
-						if (++pad_index >= CELL_PAD_MAX_PORT_NUM)
-						{
-							LOG_FATAL(RSX, "The native overlay cannot handle more than 7 pads! Current number of pads: %d", pad_index + 1);
-							continue;
-						}
-
-						for (auto &button : pad->m_buttons)
-						{
-							u8 button_id = 255;
-							if (button.m_offset == CELL_PAD_BTN_OFFSET_DIGITAL1)
-							{
-								switch (button.m_outKeyCode)
-								{
-								case CELL_PAD_CTRL_LEFT:
-									button_id = pad_button::dpad_left;
-									break;
-								case CELL_PAD_CTRL_RIGHT:
-									button_id = pad_button::dpad_right;
-									break;
-								case CELL_PAD_CTRL_DOWN:
-									button_id = pad_button::dpad_down;
-									break;
-								case CELL_PAD_CTRL_UP:
-									button_id = pad_button::dpad_up;
-									break;
-								}
-							}
-							else if (button.m_offset == CELL_PAD_BTN_OFFSET_DIGITAL2)
-							{
-								switch (button.m_outKeyCode)
-								{
-								case CELL_PAD_CTRL_TRIANGLE:
-									button_id = pad_button::triangle;
-									break;
-								case CELL_PAD_CTRL_CIRCLE:
-									button_id = g_cfg.sys.enter_button_assignment == enter_button_assign::circle ? pad_button::cross : pad_button::circle;
-									break;
-								case CELL_PAD_CTRL_SQUARE:
-									button_id = pad_button::square;
-									break;
-								case CELL_PAD_CTRL_CROSS:
-									button_id = g_cfg.sys.enter_button_assignment == enter_button_assign::circle ? pad_button::circle : pad_button::cross;
-									break;
-								}
-							}
-
-							if (button_id < 255)
-							{
-								if (button.m_pressed)
-								{
-									if (button_id < 4) // d-pad button
-									{
-										if (!button_state[pad_index][button_id] || input_timer.GetMsSince(timestamp[pad_index]) > 400)
-										{
-											// d-pad button was not pressed, or was pressed more than 400ms ago
-											timestamp[pad_index] = std::chrono::steady_clock::now();
-											on_button_pressed(static_cast<pad_button>(button_id));
-										}
-									}
-									else if (!button_state[pad_index][button_id])
-									{
-										// button was not pressed
-										on_button_pressed(static_cast<pad_button>(button_id));
-									}
-								}
-
-								button_state[pad_index][button_id] = button.m_pressed;
-							}
-
-							if (button.m_flush)
-							{
-								button.m_pressed = false;
-								button.m_flush = false;
-								button.m_value = 0;
-							}
-
-							if (exit)
-								return 0;
-						}
-					}
-
-					refresh();
-				}
-
-				// Unreachable
-				return 0;
-			}
+			s32 run_input_loop();
 		};
 
 		class display_manager
@@ -444,7 +320,7 @@ namespace rsx
 			/*
 			   minimal - fps
 			   low - fps, total cpu usage
-			   medium  - fps, detailed cpu usage
+			   medium - fps, detailed cpu usage
 			   high - fps, frametime, detailed cpu usage, thread number, rsx load
 			 */
 			detail_level m_detail;
@@ -463,7 +339,7 @@ namespace rsx
 			u32 m_font_size;
 			u32 m_margin_x; // horizontal distance to the screen border relative to the screen_quadrant in px
 			u32 m_margin_y; // vertical distance to the screen border relative to the screen_quadrant in px
-			f32 m_opacity;	// 0..1
+			f32 m_opacity;  // 0..1
 
 			bool m_force_update;
 			bool m_is_initialised{ false };
@@ -513,7 +389,7 @@ namespace rsx
 				{
 					std::unique_ptr<overlay_element> image = std::make_unique<image_view>();
 					image->set_size(160, 110);
-					image->set_padding(36, 36, 11, 11); //Square image, 88x88
+					image->set_padding(36, 36, 11, 11); // Square image, 88x88
 
 					if (resource_id != image_resource_id::raw_image)
 					{
@@ -521,7 +397,7 @@ namespace rsx
 					}
 					else if (icon_buf.size())
 					{
-						image->set_padding(0, 0, 11, 11); //Half sized icon, 320x176->160x88
+						image->set_padding(0, 0, 11, 11); // Half sized icon, 320x176->160x88
 						icon_data = std::make_unique<image_info>(icon_buf);
 						static_cast<image_view*>(image.get())->set_raw_image(icon_data.get());
 					}
@@ -1148,8 +1024,8 @@ namespace rsx
 			u8 current_dot = 255;
 
 			u64 creation_time = 0;
-			u64 expire_time = 0; //Time to end the prompt
-			u64 urgency_ctr = 0; //How critical it is to show to the user
+			u64 expire_time = 0; // Time to end the prompt
+			u64 urgency_ctr = 0; // How critical it is to show to the user
 
 			shader_compile_notification()
 			{

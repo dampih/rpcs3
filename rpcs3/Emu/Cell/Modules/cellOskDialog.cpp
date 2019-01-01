@@ -1,6 +1,8 @@
 #include "stdafx.h"
-#include "Emu/Cell/PPUModule.h"
 #include "Emu/System.h"
+#include "Emu/IdManager.h"
+#include "Emu/Cell/PPUModule.h"
+#include "pad_thread.h"
 
 #include "cellSysutil.h"
 #include "cellOskDialog.h"
@@ -8,28 +10,60 @@
 
 LOG_CHANNEL(cellOskDialog);
 
+static CellOskDialogInputFieldResult s_osk_input_result;
 static char16_t s_osk_text[CELL_OSKDIALOG_STRING_SIZE];
+static char16_t s_osk_text_old[CELL_OSKDIALOG_STRING_SIZE];
 
 s32 cellOskDialogLoadAsync(u32 container, vm::ptr<CellOskDialogParam> dialogParam, vm::ptr<CellOskDialogInputFieldInfo> inputFieldInfo)
 {
 	cellOskDialog.warning("cellOskDialogLoadAsync(container=0x%x, dialogParam=*0x%x, inputFieldInfo=*0x%x)", container, dialogParam, inputFieldInfo);
 
-	u32 maxLength = (inputFieldInfo->limit_length >= 512) ? 511 : (u32)inputFieldInfo->limit_length;
+	if (!inputFieldInfo || !inputFieldInfo->message || !inputFieldInfo->init_text || inputFieldInfo->limit_length > CELL_OSKDIALOG_STRING_SIZE)
+	{
+		return CELL_OSKDIALOG_ERROR_PARAM;
+	}
 
+	u32 maxLength = (inputFieldInfo->limit_length >= CELL_OSKDIALOG_STRING_SIZE) ? 511 : (u32)inputFieldInfo->limit_length;
+
+	s_osk_input_result = CELL_OSKDIALOG_INPUT_FIELD_RESULT_OK;
 	std::memset(s_osk_text, 0, sizeof(s_osk_text));
+	std::memset(s_osk_text_old, 0, sizeof(s_osk_text_old));
 
 	if (inputFieldInfo->init_text.addr() != 0)
+	{
 		for (u32 i = 0; (i < maxLength) && (inputFieldInfo->init_text[i] != 0); i++)
+		{
 			s_osk_text[i] = inputFieldInfo->init_text[i];
+			s_osk_text_old[i] = inputFieldInfo->init_text[i];
+		}
+	}
 
-	const auto osk = Emu.GetCallbacks().get_msg_dialog();
+	const auto osk = fxm::import<MsgDialogBase>(Emu.GetCallbacks().get_msg_dialog);
+
+	if (!osk)
+	{
+		return CELL_SYSUTIL_ERROR_BUSY;
+	}
+
 	bool result = false;
 
-	osk->on_close = [&](s32 status)
+	osk->on_close = [wptr = std::weak_ptr<MsgDialogBase>(osk)](s32 status)
 	{
-		if (status != CELL_MSGDIALOG_BUTTON_OK) sysutil_send_system_cmd(CELL_SYSUTIL_OSKDIALOG_INPUT_CANCELED, 0);
+		const auto osk = wptr.lock();
+
+		if (osk && osk->state.compare_and_swap_test(MsgDialogState::Open, MsgDialogState::Close))
+		{
+			fxm::remove<MsgDialogBase>();
+		}
+
+		if (status != CELL_MSGDIALOG_BUTTON_OK)
+		{
+			s_osk_input_result = CELL_OSKDIALOG_INPUT_FIELD_RESULT_CANCELED;
+			sysutil_send_system_cmd(CELL_SYSUTIL_OSKDIALOG_INPUT_CANCELED, 0);
+		}
 		sysutil_send_system_cmd(CELL_SYSUTIL_OSKDIALOG_FINISHED, 0);
-		result = true;
+
+		pad::SetIntercepted(false);
 	};
 
 	osk->on_osk_input_entered = [&]()
@@ -37,9 +71,12 @@ s32 cellOskDialogLoadAsync(u32 container, vm::ptr<CellOskDialogParam> dialogPara
 		sysutil_send_system_cmd(CELL_SYSUTIL_OSKDIALOG_INPUT_ENTERED, 0);
 	};
 
+	pad::SetIntercepted(true);
+
 	Emu.CallAfter([&]()
 	{
 		osk->CreateOsk("On Screen Keyboard", s_osk_text, maxLength);
+		result = true;
 	});
 
 	sysutil_send_system_cmd(CELL_SYSUTIL_OSKDIALOG_LOADED, 0);
@@ -52,14 +89,37 @@ s32 cellOskDialogLoadAsync(u32 container, vm::ptr<CellOskDialogParam> dialogPara
 	return CELL_OK;
 }
 
-s32 cellOskDialogUnloadAsync(vm::ptr<CellOskDialogCallbackReturnParam> OutputInfo)
+s32 getText(vm::ptr<CellOskDialogCallbackReturnParam> OutputInfo, bool is_unload)
 {
-	cellOskDialog.warning("cellOskDialogUnloadAsync(OutputInfo=*0x%x)", OutputInfo);
-	OutputInfo->result = CELL_OSKDIALOG_INPUT_FIELD_RESULT_OK;
-
-	for (int i = 0; i < OutputInfo->numCharsResultString; i++)
+	if (!OutputInfo || OutputInfo->numCharsResultString < 0)
 	{
-		OutputInfo->pResultString[i] = s_osk_text[i];
+		return CELL_OSKDIALOG_ERROR_PARAM;
+	}
+
+	if (is_unload)
+	{
+		OutputInfo->result = s_osk_input_result;
+	}
+	else
+	{
+		if (memcmp(s_osk_text_old, s_osk_text, sizeof(s_osk_text)) == 0)
+		{
+			OutputInfo->result = CELL_OSKDIALOG_INPUT_FIELD_RESULT_NO_INPUT_TEXT;
+		}
+		else
+		{
+			OutputInfo->result = CELL_OSKDIALOG_INPUT_FIELD_RESULT_OK;
+		}
+	}
+
+	for (s32 i = 0; i < sizeof(s_osk_text); i++)
+	{
+		s_osk_text_old[i] = s_osk_text[i];
+
+		if (i < OutputInfo->numCharsResultString && (is_unload || OutputInfo->result != CELL_OSKDIALOG_INPUT_FIELD_RESULT_NO_INPUT_TEXT))
+		{
+			OutputInfo->pResultString[i] = s_osk_text[i];
+		}
 	}
 
 	sysutil_send_system_cmd(CELL_SYSUTIL_OSKDIALOG_UNLOADED, 0);
@@ -67,17 +127,55 @@ s32 cellOskDialogUnloadAsync(vm::ptr<CellOskDialogCallbackReturnParam> OutputInf
 	return CELL_OK;
 }
 
-s32 cellOskDialogGetSize(vm::ptr<u16> width, vm::ptr<u16> height, vm::ptr<CellOskDialogType> dialogType)
+s32 cellOskDialogUnloadAsync(vm::ptr<CellOskDialogCallbackReturnParam> OutputInfo)
+{
+	cellOskDialog.warning("cellOskDialogUnloadAsync(OutputInfo=*0x%x)", OutputInfo);
+	return getText(OutputInfo, true);
+}
+
+s32 cellOskDialogGetSize(vm::ptr<u16> width, vm::ptr<u16> height, u32 /*CellOskDialogType*/ dialogType)
 {
 	cellOskDialog.warning("cellOskDialogGetSize(width=*0x%x, height=*0x%x, dialogType=*0x%x)", width, height, dialogType);
-	*width = 1;
+
+	if (!width || !height)
+	{
+		return CELL_OSKDIALOG_ERROR_PARAM;
+	}
+
+	if (dialogType >= CELL_OSKDIALOG_TYPE_SEPARATE_SINGLELINE_TEXT_WINDOW)
+	{
+		*width = 0;
+	}
+	else
+	{
+		*width = 1;
+	}
+
 	*height = 1;
+
 	return CELL_OK;
 }
 
 s32 cellOskDialogAbort()
 {
 	cellOskDialog.warning("cellOskDialogAbort()");
+
+	const auto dlg = fxm::get<MsgDialogBase>();
+
+	if (!dlg)
+	{
+		return CELL_MSGDIALOG_ERROR_DIALOG_NOT_OPENED;
+	}
+
+	if (!dlg->state.compare_and_swap_test(MsgDialogState::Open, MsgDialogState::Abort))
+	{
+		return CELL_SYSUTIL_ERROR_BUSY;
+	}
+
+	s_osk_input_result = CELL_OSKDIALOG_INPUT_FIELD_RESULT_ABORT;
+
+	verify(HERE), fxm::remove<MsgDialogBase>();
+
 	sysutil_send_system_cmd(CELL_SYSUTIL_OSKDIALOG_FINISHED, 0);
 	return CELL_OK;
 }
@@ -133,7 +231,7 @@ s32 cellOskDialogSetLayoutMode(s32 layoutMode)
 s32 cellOskDialogGetInputText(vm::ptr<CellOskDialogCallbackReturnParam> OutputInfo)
 {
 	cellOskDialog.warning("cellOskDialogGetInputText(OutputInfo=*0x%x)", OutputInfo);
-	return cellOskDialogUnloadAsync(OutputInfo); //Same but for use with cellOskDialogSetSeparateWindowOption(). TODO.
+	return getText(OutputInfo, false);
 }
 
 s32 cellOskDialogExtInputDeviceUnlock()
@@ -220,9 +318,9 @@ s32 cellOskDialogExtSetPointerEnable(b8 enable)
 	return CELL_OK;
 }
 
-s32 cellOskDialogExtUpdatePointerDisplayPos()
+s32 cellOskDialogExtUpdatePointerDisplayPos(/*const CellOskDialogPoint pos*/)
 {
-	cellOskDialog.todo("cellOskDialogExtUpdatePointerDisplayPos"); // Missing arguments
+	cellOskDialog.todo("cellOskDialogExtUpdatePointerDisplayPos(posX=%f, posY=%f)"/*, pos.x, pos.y*/);
 	return CELL_OK;
 }
 
