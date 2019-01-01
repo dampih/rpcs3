@@ -12,31 +12,6 @@
 
 LOG_CHANNEL(cellSysutil);
 
-struct sysutil_cb_manager
-{
-	std::mutex mutex;
-
-	std::array<std::pair<vm::ptr<CellSysutilCallback>, vm::ptr<void>>, 4> callbacks;
-
-	std::queue<std::function<s32(ppu_thread&)>> registered;
-
-	std::function<s32(ppu_thread&)> get_cb()
-	{
-		std::lock_guard lock(mutex);
-
-		if (registered.empty())
-		{
-			return nullptr;
-		}
-
-		auto func = std::move(registered.front());
-
-		registered.pop();
-
-		return func;
-	}
-};
-
 extern void sysutil_register_cb(std::function<s32(ppu_thread&)>&& cb)
 {
 	const auto cbm = fxm::get_always<sysutil_cb_manager>();
@@ -243,6 +218,8 @@ error_code cellSysutilCheckCallback(ppu_thread& ppu)
 	cellSysutil.trace("cellSysutilCheckCallback()");
 
 	const auto cbm = fxm::get_always<sysutil_cb_manager>();
+
+	std::lock_guard lock(cbm->sync_mutex);
 
 	while (auto func = cbm->get_cb())
 	{

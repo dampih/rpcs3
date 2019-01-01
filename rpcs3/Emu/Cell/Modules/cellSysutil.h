@@ -1,6 +1,6 @@
 ﻿#pragma once
 
-
+#include <queue>
 
 enum
 {
@@ -199,3 +199,28 @@ struct CellSysCacheParam
 
 extern void sysutil_register_cb(std::function<s32(ppu_thread&)>&&);
 extern void sysutil_send_system_cmd(u64 status, u64 param);
+
+struct sysutil_cb_manager
+{
+	std::mutex mutex, sync_mutex;
+
+	std::array<std::pair<vm::ptr<CellSysutilCallback>, vm::ptr<void>>, 4> callbacks;
+
+	std::queue<std::function<s32(ppu_thread&)>> registered;
+
+	std::function<s32(ppu_thread&)> get_cb()
+	{
+		std::lock_guard lock(mutex);
+
+		if (registered.empty())
+		{
+			return nullptr;
+		}
+
+		auto func = std::move(registered.front());
+
+		registered.pop();
+
+		return func;
+	}
+};
