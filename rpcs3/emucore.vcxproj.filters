@@ -928,12 +928,6 @@
     <ClInclude Include="..\Utilities\Thread.h">
       <Filter>Utilities</Filter>
     </ClInclude>
-    <ClInclude Include="Emu\Audio\Null\NullAudioThread.h">
-      <Filter>Emu\Audio\Null</Filter>
-    </ClInclude>
-    <ClInclude Include="Emu\Audio\AudioThread.h">
-      <Filter>Emu\Audio</Filter>
-    </ClInclude>
     <ClInclude Include="..\Utilities\File.h">
       <Filter>Utilities</Filter>
     </ClInclude>
@@ -1464,6 +1458,12 @@
     </ClInclude>
     <ClInclude Include="Emu\Memory\vm_mutex.h">
       <Filter>Emu\Memory</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\Audio\AudioBackend.h">
+      <Filter>Emu\Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\Audio\Null\NullAudioBackend.h">
+      <Filter>Emu\Audio\Null</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
