@@ -58,6 +58,9 @@ namespace vm
 	// Memory mutex acknowledgement
 	thread_local atomic_t<cpu_thread*>* g_tls_locked = nullptr;
 
+	// Currently locked address
+	atomic_t<u32> g_addr_lock = 0;
+
 	// Memory mutex: passive locks
 	std::array<atomic_t<cpu_thread*>, 32> g_locks;
 
@@ -73,11 +76,11 @@ namespace vm
 		}
 	}
 
-	bool passive_lock(cpu_thread& cpu, bool wait)
+	void passive_lock(cpu_thread& cpu)
 	{
 		if (UNLIKELY(g_tls_locked && *g_tls_locked == &cpu))
 		{
-			return true;
+			return;
 		}
 
 		if (LIKELY(g_mutex.is_lockable()))
@@ -85,31 +88,45 @@ namespace vm
 			// Optimistic path (hope that mutex is not exclusively locked)
 			_register_lock(&cpu);
 
-			if (UNLIKELY(!g_mutex.is_lockable()))
+			if (LIKELY(g_mutex.is_lockable()))
 			{
-				passive_unlock(cpu);
-
-				if (!wait)
-				{
-					return false;
-				}
-
-				::reader_lock lock(g_mutex);
-				_register_lock(&cpu);
+				return;
 			}
+
+			passive_unlock(cpu);
 		}
-		else
+
+		::reader_lock lock(g_mutex);
+		_register_lock(&cpu);
+	}
+
+	static inline bool is_free_addr(const u32 target, const u32 addr, const u32 size)
+	{
+		return addr > target || addr + size <= target;
+	}
+
+	void passive_lock(cpu_thread& cpu, const u32 addr, const u32 size)
+	{
+		if (UNLIKELY(g_tls_locked && *g_tls_locked == &cpu))
 		{
-			if (!wait)
-			{
-				return false;
-			}
-
-			::reader_lock lock(g_mutex);
-			_register_lock(&cpu);
+			return;
 		}
 
-		return true;
+		if (LIKELY(is_free_addr(g_addr_lock, addr, size)))
+		{
+			// Optimistic path (hope that mutex is not exclusively locked)
+			_register_lock(&cpu);
+
+			if (LIKELY(is_free_addr(g_addr_lock, addr, size)))
+			{
+				return;
+			}
+
+			passive_unlock(cpu);
+		}
+
+		::reader_lock lock(g_mutex);
+		_register_lock(&cpu);
 	}
 
 	void passive_unlock(cpu_thread& cpu)
@@ -196,7 +213,6 @@ namespace vm
 	}
 
 	writer_lock::writer_lock(u32 addr)
-		: locked(true)
 	{
 		auto cpu = get_current_cpu_thread();
 
@@ -219,6 +235,8 @@ namespace vm
 					}
 				}
 			}
+
+			g_addr_lock = addr;
 
 			for (auto& lock : g_locks)
 			{
@@ -260,10 +278,8 @@ namespace vm
 
 	writer_lock::~writer_lock()
 	{
-		if (locked)
-		{
-			g_mutex.unlock();
-		}
+		g_addr_lock.raw() = 0;
+		g_mutex.unlock();
 	}
 
 	void reservation_lock_internal(atomic_t<u64>& res)
