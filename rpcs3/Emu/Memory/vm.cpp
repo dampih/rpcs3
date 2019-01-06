@@ -6,6 +6,7 @@
 #include "Utilities/VirtualMemory.h"
 #include "Utilities/asm.h"
 #include "Emu/CPU/CPUThread.h"
+#include "Emu/Cell/SPUThread.h"
 #include "Emu/Cell/lv2/sys_memory.h"
 #include "Emu/RSX/GSRender.h"
 #include <atomic>
@@ -57,6 +58,9 @@ namespace vm
 	// Memory mutex acknowledgement
 	thread_local atomic_t<cpu_thread*>* g_tls_locked = nullptr;
 
+	// Currently locked address
+	atomic_t<u32> g_addr_lock = 0;
+
 	// Memory mutex: passive locks
 	std::array<atomic_t<cpu_thread*>, 32> g_locks;
 
@@ -72,11 +76,11 @@ namespace vm
 		}
 	}
 
-	bool passive_lock(cpu_thread& cpu, bool wait)
+	void passive_lock(cpu_thread& cpu)
 	{
 		if (UNLIKELY(g_tls_locked && *g_tls_locked == &cpu))
 		{
-			return true;
+			return;
 		}
 
 		if (LIKELY(g_mutex.is_lockable()))
@@ -84,31 +88,45 @@ namespace vm
 			// Optimistic path (hope that mutex is not exclusively locked)
 			_register_lock(&cpu);
 
-			if (UNLIKELY(!g_mutex.is_lockable()))
+			if (LIKELY(g_mutex.is_lockable()))
 			{
-				passive_unlock(cpu);
-
-				if (!wait)
-				{
-					return false;
-				}
-
-				::reader_lock lock(g_mutex);
-				_register_lock(&cpu);
+				return;
 			}
+
+			passive_unlock(cpu);
 		}
-		else
+
+		::reader_lock lock(g_mutex);
+		_register_lock(&cpu);
+	}
+
+	static inline bool is_free_addr(const u32 target, const u32 addr, const u32 size)
+	{
+		return addr > target || addr + size <= target;
+	}
+
+	void passive_lock(cpu_thread& cpu, const u32 addr, const u32 size)
+	{
+		if (UNLIKELY(g_tls_locked && *g_tls_locked == &cpu))
 		{
-			if (!wait)
-			{
-				return false;
-			}
-
-			::reader_lock lock(g_mutex);
-			_register_lock(&cpu);
+			return;
 		}
 
-		return true;
+		if (LIKELY(is_free_addr(g_addr_lock, addr, size)))
+		{
+			// Optimistic path (hope that mutex is not exclusively locked)
+			_register_lock(&cpu);
+
+			if (LIKELY(is_free_addr(g_addr_lock, addr, size)))
+			{
+				return;
+			}
+
+			passive_unlock(cpu);
+		}
+
+		::reader_lock lock(g_mutex);
+		_register_lock(&cpu);
 	}
 
 	void passive_unlock(cpu_thread& cpu)
@@ -194,8 +212,7 @@ namespace vm
 		m_upgraded = true;
 	}
 
-	writer_lock::writer_lock(int full)
-		: locked(true)
+	writer_lock::writer_lock(u32 addr)
 	{
 		auto cpu = get_current_cpu_thread();
 
@@ -206,15 +223,20 @@ namespace vm
 
 		g_mutex.lock();
 
-		if (full)
+		if (addr)
 		{
 			for (auto& lock : g_locks)
 			{
 				if (cpu_thread* ptr = lock)
 				{
-					ptr->state.test_and_set(cpu_flag::memory);
+					if (LIKELY(ptr->id_type() == 1))
+					{
+						ptr->state.test_and_set(cpu_flag::memory);
+					}
 				}
 			}
+
+			g_addr_lock = addr;
 
 			for (auto& lock : g_locks)
 			{
@@ -225,7 +247,24 @@ namespace vm
 						break;
 					}
 
-					busy_wait();
+					if (UNLIKELY(ptr->id_type() == 2))
+					{
+						const u32 target = static_cast<spu_thread*>(ptr)->ch_mfc_cmd.eal & -128u;
+
+						if (target > addr)
+						{
+							break;
+						}
+
+						const u32 size = align(static_cast<spu_thread*>(ptr)->ch_mfc_cmd.size, 128);
+
+						if (target + size <= addr)
+						{
+							break;
+						}
+					}
+
+					_mm_pause();
 				}
 			}
 		}
@@ -239,10 +278,8 @@ namespace vm
 
 	writer_lock::~writer_lock()
 	{
-		if (locked)
-		{
-			g_mutex.unlock();
-		}
+		g_addr_lock.raw() = 0;
+		g_mutex.unlock();
 	}
 
 	void reservation_lock_internal(atomic_t<u64>& res)
