@@ -8,7 +8,7 @@ enum
 	CELL_MSGDIALOG_STRING_SIZE             = 512,
 };
 
-enum
+enum CellMsgDialogError : u32
 {
 	CELL_MSGDIALOG_ERROR_PARAM             = 0x8002b301,
 	CELL_MSGDIALOG_ERROR_DIALOG_NOT_OPENED = 0x8002b302,
@@ -91,16 +91,14 @@ protected:
 	s32 taskbar_index = 0;
 
 public:
-	atomic_t<MsgDialogState> state{ MsgDialogState::Open };
+	atomic_t<MsgDialogState> state{ MsgDialogState::Close };
 
 	MsgDialogType type{};
 
 	std::function<void(s32 status)> on_close;
-	std::function<void()> on_osk_input_entered;
 
 	virtual ~MsgDialogBase();
 	virtual void Create(const std::string& msg, const std::string& title = "") = 0;
-	virtual void CreateOsk(const std::string& msg, char16_t* osk_text, u32 charlimit) = 0;
 	virtual void SetMsg(const std::string& msg) = 0;
 	virtual void ProgressBarSetMsg(u32 progressBarIndex, const std::string& msg) = 0;
 	virtual void ProgressBarReset(u32 progressBarIndex) = 0;
