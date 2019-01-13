@@ -3529,9 +3529,9 @@ public:
 						csize = ci->getZExtValue();
 					}
 
-					if (cmd >= MFC_SNDSIG_CMD)
+					if (cmd >= MFC_SNDSIG_CMD && csize != 4)
 					{
-						csize = 4;
+						csize = -1;
 					}
 
 					llvm::Value* src = m_ir->CreateGEP(m_lsptr, zext<u64>(lsa).value);

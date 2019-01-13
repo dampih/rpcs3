@@ -1421,7 +1421,6 @@ bool spu_thread::process_mfc_cmd()
 	{
 		if (ch_mfc_cmd.size != 4)
 		{
-			// TODO: Is this valid?
 			break;
 		}
 
