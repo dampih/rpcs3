@@ -2143,53 +2143,6 @@ bool spu_thread::stop_and_signal(u32 code)
 
 	switch (code)
 	{
-	case 0x000:
-	{
-		LOG_WARNING(SPU, "STOP 0x0");
-
-		// HACK: find an ILA instruction
-		for (u32 addr = pc; addr < 0x40000; addr += 4)
-		{
-			const u32 instr = _ref<u32>(addr);
-
-			if (instr >> 25 == 0x21)
-			{
-				pc = addr;
-				return false;
-			}
-
-			if (instr > 0x1fffff)
-			{
-				break;
-			}
-		}
-
-		// HACK: wait for executable code
-		while (!_ref<u32>(pc))
-		{
-			if (is_stopped())
-			{
-				return false;
-			}
-
-			thread_ctrl::wait_for(1000);
-		}
-
-		return false;
-	}
-
-	case 0x001:
-	{
-		thread_ctrl::wait_for(1000); // hack
-		return true;
-	}
-
-	case 0x002:
-	{
-		state += cpu_flag::ret;
-		return true;
-	}
-
 	case 0x110:
 	{
 		/* ===== sys_spu_thread_receive_event ===== */
@@ -2447,6 +2400,7 @@ bool spu_thread::stop_and_signal(u32 code)
 	}
 	}
 
+	// TODO: Signal sys_spu exception event, set group running status to STOPPED
 	if (!ch_out_mbox.get_count())
 	{
 		fmt::throw_exception("Unknown STOP code: 0x%x (Out_MBox is empty)" HERE, code);
