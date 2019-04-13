@@ -37,6 +37,23 @@ enum : u64
 
 enum : u32
 {
+	SYS_SPU_EXCEPTION_DMA_ALIGNMENT  = 0x0001,
+	SYS_SPU_EXCEPTION_DMA_COMMAND    = 0x0002,
+	SYS_SPU_EXCEPTION_SPU_ERROR      = 0x0004,
+	SYS_SPU_EXCEPTION_MFC_FIR        = 0x0008,
+	SYS_SPU_EXCEPTION_MFC_SEGMENT    = 0x0010,
+	SYS_SPU_EXCEPTION_MFC_STORAGE    = 0x0020,
+	SYS_SPU_EXCEPTION_STOP_CALL      = 0x0100,
+	SYS_SPU_EXCEPTION_STOP_BREAK     = 0x0200,
+	SYS_SPU_EXCEPTION_HALT           = 0x0400,
+	SYS_SPU_EXCEPTION_UNKNOWN_SIGNAL = 0x0800,
+	SYS_SPU_EXCEPTION_NON_CONTEXT    = 0x1000,
+	SYS_SPU_EXCEPTION_MAT            = 0x2000,
+	SYS_SPU_EXCEPTION_NO_VALUE       = 0x0000
+};
+
+enum : u32
+{
 	SPU_THREAD_GROUP_STATUS_NOT_INITIALIZED,
 	SPU_THREAD_GROUP_STATUS_INITIALIZED,
 	SPU_THREAD_GROUP_STATUS_READY,
@@ -209,8 +226,8 @@ enum : u32
 
 struct lv2_spu_group
 {
-	static const u32 id_base = 1; // Wrong?
-	static const u32 id_step = 1;
+	static const u32 id_base = 0x04000100;
+	static const u32 id_step = 0x100;
 	static const u32 id_count = 255;
 
 	const std::string name;

@@ -553,33 +553,11 @@ error_code sys_spu_thread_group_terminate(u32 id, s32 value)
 {
 	sys_spu.trace("sys_spu_thread_group_terminate(id=0x%x, value=0x%x)", id, value);
 
-	// The id can be either SPU Thread Group or SPU Thread
-	const auto thread = idm::get<named_thread<spu_thread>>(id);
-	const auto _group = idm::get<lv2_spu_group>(id);
-	const auto group = thread ? thread->group : _group.get();
+	const auto group = idm::get<lv2_spu_group>(id);
 
-	if (!group && (!thread || !thread->group))
+	if (!group)
 	{
 		return CELL_ESRCH;
-	}
-
-	if (thread)
-	{
-		for (auto& t : group->threads)
-		{
-			// find primary (?) thread and compare it with the one specified
-			if (t)
-			{
-				if (t == thread)
-				{
-					break;
-				}
-				else
-				{
-					return CELL_EPERM;
-				}
-			}
-		}
 	}
 
 	std::unique_lock lock(group->mutex);
