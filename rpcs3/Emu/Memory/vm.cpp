@@ -7,7 +7,7 @@
 #include "Utilities/asm.h"
 #include "Emu/CPU/CPUThread.h"
 #include "Emu/Cell/lv2/sys_memory.h"
-#include "Emu/RSX/GSRender.h"
+#include "Emu/RSX/RSXThread.h"
 #include <atomic>
 #include <thread>
 #include <deque>
@@ -347,7 +347,7 @@ namespace vm
 		// Notify rsx that range has become valid
 		// Note: This must be done *before* memory gets mapped while holding the vm lock, otherwise
 		//       the RSX might try to invalidate memory that got unmapped and remapped
-		if (const auto rsxthr = fxm::check_unlocked<GSRender>())
+		if (const auto rsxthr = rsx::get_current_renderer())
 		{
 			rsxthr->on_notify_memory_mapped(addr, size);
 		}
@@ -476,7 +476,7 @@ namespace vm
 		// Notify rsx to invalidate range
 		// Note: This must be done *before* memory gets unmapped while holding the vm lock, otherwise
 		//       the RSX might try to call VirtualProtect on memory that is already unmapped
-		if (const auto rsxthr = fxm::check_unlocked<GSRender>())
+		if (const auto rsxthr = rsx::get_current_renderer())
 		{
 			rsxthr->on_notify_memory_unmapped(addr, size);
 		}
@@ -715,7 +715,7 @@ namespace vm
 			shm = std::make_shared<utils::shm>(size);
 
 		// Search for an appropriate place (unoptimized)
-		for (u32 addr = ::align(this->addr, align); addr < this->addr + this->size - 1; addr += align)
+		for (u32 addr = ::align(this->addr, align), max = this->addr + this->size - size; addr <= max; addr += align)
 		{
 			if (try_alloc(addr, pflags, size, std::move(shm)))
 			{
@@ -892,7 +892,7 @@ namespace vm
 
 	static std::shared_ptr<block_t> _find_map(u32 size, u32 align, u64 flags)
 	{
-		for (u32 addr = ::align<u32>(0x20000000, align); addr < 0xC0000000; addr += align)
+		for (u32 addr = ::align<u32>(0x10000000, align); addr < 0xC0000000; addr += align)
 		{
 			if (_test_map(addr, size))
 			{
@@ -995,7 +995,7 @@ namespace vm
 		return nullptr;
 	}
 
-	std::shared_ptr<block_t> get(memory_location_t location, u32 addr, u32 area_size)
+	std::shared_ptr<block_t> get(memory_location_t location, u32 addr, u32 area_size, u64 flags)
 	{
 		vm::reader_lock lock;
 
@@ -1038,7 +1038,7 @@ namespace vm
 		if (area_size)
 		{
 			lock.upgrade();
-			return _map(addr, area_size, 0x200);
+			return _map(addr, area_size, flags);
 		}
 
 		return nullptr;
@@ -1050,8 +1050,8 @@ namespace vm
 		{
 			g_locations =
 			{
-				std::make_shared<block_t>(0x00010000, 0x1FFF0000, 0x200), // main
-				std::make_shared<block_t>(0x20000000, 0x10000000, 0x201), // user 64k pages
+				std::make_shared<block_t>(0x00010000, 0x0FFF0000, 0x200), // main
+				nullptr, // user 64k pages
 				nullptr, // user 1m pages
 				std::make_shared<block_t>(0xC0000000, 0x10000000), // video
 				std::make_shared<block_t>(0xD0000000, 0x10000000, 0x111), // stack

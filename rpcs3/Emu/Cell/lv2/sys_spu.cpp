@@ -14,6 +14,7 @@
 #include "sys_interrupt.h"
 #include "sys_mmapper.h"
 #include "sys_event.h"
+#include "sys_fs.h"
 #include "sys_spu.h"
 
 LOG_CHANNEL(sys_spu);
@@ -127,12 +128,12 @@ void sys_spu_image::deploy(u32 loc, sys_spu_segment* segs, u32 nsegs)
 	}
 
 	// Apply the patch
-	auto applied = fxm::check_unlocked<patch_engine>()->apply(hash, vm::g_base_addr + loc);
+	auto applied = fxm::check<patch_engine>()->apply(hash, vm::g_base_addr + loc);
 
 	if (!Emu.GetTitleID().empty())
 	{
 		// Alternative patch
-		applied += fxm::check_unlocked<patch_engine>()->apply(Emu.GetTitleID() + '-' + hash, vm::g_base_addr + loc);
+		applied += fxm::check<patch_engine>()->apply(Emu.GetTitleID() + '-' + hash, vm::g_base_addr + loc);
 	}
 
 	LOG_NOTICE(LOADER, "Loaded SPU image: %s (<- %u)%s", hash, applied, dump);
@@ -159,21 +160,38 @@ error_code _sys_spu_image_get_information(vm::ptr<sys_spu_image> img, vm::ptr<u3
 	return CELL_OK;
 }
 
-error_code sys_spu_image_open(vm::ptr<sys_spu_image> img, vm::cptr<char> path)
+static error_code spu_image_open(vm::ptr<sys_spu_image> img, std::string_view path)
 {
-	sys_spu.warning("sys_spu_image_open(img=*0x%x, path=%s)", img, path);
-
-	const fs::file elf_file = decrypt_self(fs::file(vfs::get(path.get_ptr())), fxm::get_always<LoadedNpdrmKeys_t>()->devKlic.data());
+	const fs::file elf_file = decrypt_self(fs::file(vfs::get(path)), fxm::get_always<LoadedNpdrmKeys_t>()->devKlic.data());
 
 	if (!elf_file)
 	{
-		sys_spu.error("sys_spu_image_open() error: failed to open %s!", path);
 		return CELL_ENOENT;
 	}
 
 	img->load(elf_file);
-
 	return CELL_OK;
+}
+
+error_code sys_spu_image_open(vm::ptr<sys_spu_image> img, vm::cptr<char> path)
+{
+	sys_spu.warning("sys_spu_image_open(img=*0x%x, path=%s)", img, path);
+
+	return spu_image_open(img, path.get_ptr());
+}
+
+error_code sys_spu_image_open_by_fd(vm::ptr<sys_spu_image> img, u32 fd)
+{
+	sys_spu.warning("sys_spu_image_open_by_fd(img=*0x%x, fd=%d)", img, fd);
+
+	const auto file = idm::get<lv2_fs_object, lv2_file>(fd);
+
+	if (!file)
+	{
+		return CELL_EBADF;
+	}
+
+	return spu_image_open(img, file->name.data());
 }
 
 error_code _sys_spu_image_import(vm::ptr<sys_spu_image> img, u32 src, u32 size, u32 arg4)
@@ -1323,16 +1341,16 @@ error_code sys_raw_spu_destroy(ppu_thread& ppu, u32 id)
 	// Clear interrupt handlers
 	for (auto& intr : thread->int_ctrl)
 	{
-		if (intr.tag)
+		if (auto _tag = intr.tag.lock())
 		{
-			if (auto handler = intr.tag->handler.lock())
+			if (auto handler = _tag->handler.lock())
 			{
 				// SLEEP
 				handler->join();
 				to_remove.emplace(handler.get(), 0);
 			}
 
-			to_remove.emplace(intr.tag.get(), 0);
+			to_remove.emplace(_tag.get(), 0);
 		}
 	}
 
@@ -1385,7 +1403,7 @@ error_code sys_raw_spu_create_interrupt_tag(u32 id, u32 class_id, u32 hwthread, 
 
 		auto& int_ctrl = thread->int_ctrl[class_id];
 
-		if (int_ctrl.tag)
+		if (int_ctrl.tag.lock())
 		{
 			error = CELL_EAGAIN;
 			return result;
