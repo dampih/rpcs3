@@ -175,7 +175,7 @@ error_code sys_rsx_context_iomap(u32 context_id, u32 io, u32 ea, u32 size, u64 f
 {
 	sys_rsx.warning("sys_rsx_context_iomap(context_id=0x%x, io=0x%x, ea=0x%x, size=0x%x, flags=0x%llx)", context_id, io, ea, size, flags);
 
-	if (!size || io & 0xFFFFF || ea + u64{size} >= rsx::constants::local_mem_base || ea & 0xFFFFF || size & 0xFFFFF ||
+	if (!size || io & 0xFFFFF || ea + u64{size} > rsx::constants::local_mem_base || ea & 0xFFFFF || size & 0xFFFFF ||
 		rsx::get_current_renderer()->main_mem_size < io + u64{size})
 	{
 		return CELL_EINVAL;
