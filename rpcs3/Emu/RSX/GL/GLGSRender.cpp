@@ -626,7 +626,7 @@ void GLGSRender::end()
 		}
 	} while (rsx::method_registers.current_draw_clause.next());
 
-	m_rtts.on_write();
+	m_rtts.on_write(rsx::method_registers.color_write_enabled(), rsx::method_registers.depth_write_enabled());
 
 	m_attrib_ring_buffer->notify();
 	m_index_ring_buffer->notify();
@@ -1152,7 +1152,7 @@ void GLGSRender::clear_surface(u32 arg)
 			if (require_mem_load) ds->write_barrier(cmd);
 
 			// Memory has been initialized
-			m_rtts.on_write(std::get<0>(m_rtts.m_bound_depth_stencil));
+			m_rtts.on_write(false, true);
 		}
 	}
 
@@ -1189,7 +1189,7 @@ void GLGSRender::clear_surface(u32 arg)
 				if (const auto address = rtt.first)
 				{
 					if (require_mem_load) rtt.second->write_barrier(cmd);
-					m_rtts.on_write(address);
+					m_rtts.on_write(true, false, address);
 				}
 			}
 
@@ -1629,7 +1629,7 @@ void GLGSRender::flip(int buffer, bool emu_flip)
 			else
 			{
 				gl::command_context cmd = { gl_state };
-				const auto overlap_info = m_rtts.get_merged_texture_memory_region(cmd, absolute_address, buffer_width, buffer_height, buffer_pitch, render_target_texture->get_bpp());
+				const auto overlap_info = m_rtts.get_merged_texture_memory_region(cmd, absolute_address, buffer_width, buffer_height, buffer_pitch, render_target_texture->get_bpp(), rsx::surface_access::read);
 
 				if (!overlap_info.empty() && overlap_info.back().surface == render_target_texture)
 				{
